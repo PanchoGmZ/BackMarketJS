@@ -1,0 +1,18 @@
+{
+  "actorSpecification": 1,
+  "name": "backmarket-url-extractor-js",
+  "title": "Back Market URL Extractor (JavaScript)",
+  "description": "Independent Node.js migration of the verified Nuxt product extractor. One URL and one aggregate reference1688 record.",
+  "version": "0.1",
+  "meta": {
+    "generatedBy": "Codex with GPT-6.1 Sol"
+  },
+  "input": "./input_schema.json",
+  "output": "./output_schema.json",
+  "storages": {
+    "dataset": "./dataset_schema.json",
+    "keyValueStore": "./key_value_store_schema.json"
+  },
+  "dockerfile": "../Dockerfile",
+  "readme": "../README.md"
+}

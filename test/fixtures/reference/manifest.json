@@ -1,0 +1,27 @@
+{
+  "sourceProject": "backmarket-scraper",
+  "sourceCommit": "78533283ac738ca82220da0bbf507d768a5800a9",
+  "kind": "authentic-filtered-commercial-captures",
+  "entries": [
+    {
+      "file": "eda80a12-a40b-4faa-b0f6-438bea90f1e5/commercial.html",
+      "sha256": "90fedadae087e76f6877cebde080ddae0530f13d94237cae8b5a4a7cba372d70",
+      "bytes": 6890
+    },
+    {
+      "file": "eda80a12-a40b-4faa-b0f6-438bea90f1e5/python-output.json",
+      "sha256": "349e4c93ac8ac30c5ebcbd0c1afef25873222e82f6702d84dac7bd71a2cc491d",
+      "bytes": 4837
+    },
+    {
+      "file": "393000c0-1f19-43fc-9f89-e6faf3f3bd46/commercial.html",
+      "sha256": "11c258a7678aeb3e2afe3345464541183b69f9a38cb484566a2f2b60a43df98a",
+      "bytes": 7391
+    },
+    {
+      "file": "393000c0-1f19-43fc-9f89-e6faf3f3bd46/python-output.json",
+      "sha256": "0260705acca361cd38edbb440628b97610daf6addaeaf13b0a311dd367eb4c84",
+      "bytes": 5181
+    }
+  ]
+}

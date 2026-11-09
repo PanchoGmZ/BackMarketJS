@@ -1,0 +1,207 @@
+{
+  "url": "https://www.backmarket.com/en-us/p/iphone-15-plus-128-gb-yellow-unlocked/eda80a12-a40b-4faa-b0f6-438bea90f1e5",
+  "title": "iPhone 15 Plus 128GB  - Yellow - Unlocked",
+  "price": "413.00",
+  "productLadderPrices": [],
+  "moq": null,
+  "weight": {
+    "value": 0.201,
+    "unit": "kg"
+  },
+  "dimensions": null,
+  "images": [
+    "https://d2e6ccujb3mkqf.cloudfront.net/eda80a12-a40b-4faa-b0f6-438bea90f1e5-1_acebfbb6-ca59-4cd6-be14-267b67fa9043.jpg",
+    "https://d2e6ccujb3mkqf.cloudfront.net/eda80a12-a40b-4faa-b0f6-438bea90f1e5-2_decbd170-5a2e-46b2-ab65-d2d1fe293959.jpg",
+    "https://d2e6ccujb3mkqf.cloudfront.net/eda80a12-a40b-4faa-b0f6-438bea90f1e5-3_79c70dc7-32f1-4ddc-acc8-e03ea1dcacd7.jpg",
+    "https://d2e6ccujb3mkqf.cloudfront.net/eda80a12-a40b-4faa-b0f6-438bea90f1e5-4_9fc58910-ac6e-40d4-8b82-4df79bc8cc23.jpg",
+    "https://d2e6ccujb3mkqf.cloudfront.net/eda80a12-a40b-4faa-b0f6-438bea90f1e5-5_7a675823-3d43-4100-8089-5b9ebfe8699c.jpg",
+    "https://d2e6ccujb3mkqf.cloudfront.net/eda80a12-a40b-4faa-b0f6-438bea90f1e5-6_9ef46543-601c-4a7b-87d0-3300b96fd7d0.jpg"
+  ],
+  "characteristics": [
+    {
+      "attrName": "Color (official name)",
+      "attrValue": "Yellow"
+    },
+    {
+      "attrName": "Resolution",
+      "attrValue": "1290 x 2796"
+    },
+    {
+      "attrName": "Memory Card Slot",
+      "attrValue": "No"
+    },
+    {
+      "attrName": "Screen type",
+      "attrValue": "Super Retina XDR OLED"
+    },
+    {
+      "attrName": "Release Year",
+      "attrValue": "2023"
+    },
+    {
+      "attrName": "Memory (GB)",
+      "attrValue": "6 GB"
+    },
+    {
+      "attrName": "Foldable",
+      "attrValue": "No"
+    },
+    {
+      "attrName": "Manufacturer Ref.",
+      "attrValue": "A2847"
+    },
+    {
+      "attrName": "Serie",
+      "attrValue": "Apple iPhone 15"
+    },
+    {
+      "attrName": "Carrier compatibility",
+      "attrValue": "Unlocked"
+    },
+    {
+      "attrName": "Main camera",
+      "attrValue": "48 megapixels"
+    },
+    {
+      "attrName": "Network",
+      "attrValue": "5G"
+    },
+    {
+      "attrName": "OS",
+      "attrValue": "iOS"
+    },
+    {
+      "attrName": "Last OS Compatibility",
+      "attrValue": "Yes"
+    },
+    {
+      "attrName": "Screen size (inches)",
+      "attrValue": "6.7"
+    },
+    {
+      "attrName": "Connector",
+      "attrValue": "USB-C (USB 2)"
+    },
+    {
+      "attrName": "Storage",
+      "attrValue": "128 GB"
+    },
+    {
+      "attrName": "Weight",
+      "attrValue": "201 oz"
+    },
+    {
+      "attrName": "SIM card",
+      "attrValue": "eSIM"
+    },
+    {
+      "attrName": "Model",
+      "attrValue": "iPhone 15 Plus"
+    },
+    {
+      "attrName": "Brand",
+      "attrValue": "Apple"
+    },
+    {
+      "attrName": "Color",
+      "attrValue": "Yellow"
+    },
+    {
+      "attrName": "Front camera",
+      "attrValue": "12 megapixels"
+    }
+  ],
+  "variations": [
+    {
+      "name": "grades",
+      "variants": [
+        {
+          "name": "Fair",
+          "price": "413.00",
+          "image": null
+        },
+        {
+          "name": "Good",
+          "price": "424.00",
+          "image": null
+        },
+        {
+          "name": "Excellent",
+          "price": "443.00",
+          "image": null
+        },
+        {
+          "name": "Premium",
+          "price": "569.00",
+          "image": null
+        }
+      ]
+    },
+    {
+      "name": "battery",
+      "variants": [
+        {
+          "name": "Standard battery",
+          "price": "413.00",
+          "image": null
+        },
+        {
+          "name": "Long-lasting battery",
+          "price": "448.00",
+          "image": null
+        }
+      ]
+    },
+    {
+      "name": "storage",
+      "variants": [
+        {
+          "name": "128 GB",
+          "price": "413.00",
+          "image": null
+        },
+        {
+          "name": "256 GB",
+          "price": "460.00",
+          "image": null
+        },
+        {
+          "name": "512 GB",
+          "price": "653.97",
+          "image": null
+        }
+      ]
+    },
+    {
+      "name": "color",
+      "variants": [
+        {
+          "name": "Black",
+          "price": "389.00",
+          "image": null
+        },
+        {
+          "name": "Yellow",
+          "price": "413.00",
+          "image": null
+        },
+        {
+          "name": "Blue",
+          "price": "414.00",
+          "image": null
+        },
+        {
+          "name": "Green",
+          "price": "438.00",
+          "image": null
+        },
+        {
+          "name": "Pink",
+          "price": "401.00",
+          "image": null
+        }
+      ]
+    }
+  ],
+  "productId": "eda80a12-a40b-4faa-b0f6-438bea90f1e5"
+}

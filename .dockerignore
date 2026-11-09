@@ -1,0 +1,17 @@
+node_modules
+storage
+output
+reports
+.cache
+.tmp
+.git
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+cookies*
+browser-profile*
+test
+scripts

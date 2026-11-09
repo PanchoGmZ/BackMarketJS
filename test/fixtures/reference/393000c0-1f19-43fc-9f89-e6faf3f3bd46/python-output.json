@@ -1,0 +1,223 @@
+{
+  "url": "https://www.backmarket.com/en-us/p/iphone-14-pro-128-gb-deep-purple-fully-unlocked-gsm-cdma/393000c0-1f19-43fc-9f89-e6faf3f3bd46",
+  "title": "iPhone 14 Pro 128GB  - Deep Purple - Unlocked",
+  "price": "379.00",
+  "productLadderPrices": [],
+  "moq": null,
+  "weight": {
+    "value": 0.198446661875,
+    "unit": "kg"
+  },
+  "dimensions": null,
+  "images": [
+    "https://d2e6ccujb3mkqf.cloudfront.net/393000c0-1f19-43fc-9f89-e6faf3f3bd46-1_8d781740-b838-4b20-83a0-77ecab2af2f6.jpg",
+    "https://d2e6ccujb3mkqf.cloudfront.net/393000c0-1f19-43fc-9f89-e6faf3f3bd46-2_306cd39b-a6e9-4bbc-a305-e1af7844f5c0.jpg",
+    "https://d2e6ccujb3mkqf.cloudfront.net/393000c0-1f19-43fc-9f89-e6faf3f3bd46-3_a59f84e7-f31b-4f47-81a9-5d4014d4d552.jpg",
+    "https://d2e6ccujb3mkqf.cloudfront.net/393000c0-1f19-43fc-9f89-e6faf3f3bd46-4_c1855103-22b8-41cd-a97f-40fa85e2d624.jpg",
+    "https://d2e6ccujb3mkqf.cloudfront.net/393000c0-1f19-43fc-9f89-e6faf3f3bd46-5_1b88cab4-a910-416e-ab75-8903373f2f26.jpg",
+    "https://d2e6ccujb3mkqf.cloudfront.net/393000c0-1f19-43fc-9f89-e6faf3f3bd46-6_7c1add4d-772d-4038-8700-9d7c2e226b2a.jpg"
+  ],
+  "characteristics": [
+    {
+      "attrName": "MPN",
+      "attrValue": "MQ0E3LL/A"
+    },
+    {
+      "attrName": "Memory (GB)",
+      "attrValue": "6 GB"
+    },
+    {
+      "attrName": "OS",
+      "attrValue": "iOS"
+    },
+    {
+      "attrName": "Manufacturer Ref.",
+      "attrValue": "A2650"
+    },
+    {
+      "attrName": "Carrier compatibility",
+      "attrValue": "Unlocked"
+    },
+    {
+      "attrName": "Front camera",
+      "attrValue": "12 megapixels"
+    },
+    {
+      "attrName": "Resolution",
+      "attrValue": "1179 x 2556"
+    },
+    {
+      "attrName": "Brand",
+      "attrValue": "Apple"
+    },
+    {
+      "attrName": "Last OS Compatibility",
+      "attrValue": "Yes"
+    },
+    {
+      "attrName": "Screen size (inches)",
+      "attrValue": "6.1"
+    },
+    {
+      "attrName": "Foldable",
+      "attrValue": "No"
+    },
+    {
+      "attrName": "Network",
+      "attrValue": "5G"
+    },
+    {
+      "attrName": "Memory Card Slot",
+      "attrValue": "No"
+    },
+    {
+      "attrName": "Weight",
+      "attrValue": "7 oz"
+    },
+    {
+      "attrName": "Storage",
+      "attrValue": "128 GB"
+    },
+    {
+      "attrName": "Serie",
+      "attrValue": "Apple iPhone 14"
+    },
+    {
+      "attrName": "Release Year",
+      "attrValue": "2022"
+    },
+    {
+      "attrName": "Width",
+      "attrValue": "2.81 in"
+    },
+    {
+      "attrName": "Screen type",
+      "attrValue": "LTPO Super Retina XDR OLED"
+    },
+    {
+      "attrName": "Color",
+      "attrValue": "Deep Purple"
+    },
+    {
+      "attrName": "Main camera",
+      "attrValue": "48 megapixels"
+    },
+    {
+      "attrName": "Height",
+      "attrValue": "5.81 in"
+    },
+    {
+      "attrName": "Color (official name)",
+      "attrValue": "Deep Purple"
+    },
+    {
+      "attrName": "Model",
+      "attrValue": "iPhone 14 Pro"
+    },
+    {
+      "attrName": "SIM card",
+      "attrValue": "eSIM"
+    },
+    {
+      "attrName": "Depth",
+      "attrValue": "0.31 in"
+    },
+    {
+      "attrName": "Connector",
+      "attrValue": "Lightning"
+    }
+  ],
+  "variations": [
+    {
+      "name": "grades",
+      "variants": [
+        {
+          "name": "Fair",
+          "price": "379.00",
+          "image": null
+        },
+        {
+          "name": "Good",
+          "price": "428.00",
+          "image": null
+        },
+        {
+          "name": "Excellent",
+          "price": "439.95",
+          "image": null
+        },
+        {
+          "name": "Premium",
+          "price": "582.00",
+          "image": null
+        }
+      ]
+    },
+    {
+      "name": "battery",
+      "variants": [
+        {
+          "name": "Standard battery",
+          "price": "379.00",
+          "image": null
+        },
+        {
+          "name": "Long-lasting battery",
+          "price": "401.00",
+          "image": null
+        }
+      ]
+    },
+    {
+      "name": "storage",
+      "variants": [
+        {
+          "name": "128 GB",
+          "price": "379.00",
+          "image": null
+        },
+        {
+          "name": "256 GB",
+          "price": "441.00",
+          "image": null
+        },
+        {
+          "name": "512 GB",
+          "price": "447.00",
+          "image": null
+        },
+        {
+          "name": "1000 GB",
+          "price": "455.00",
+          "image": null
+        }
+      ]
+    },
+    {
+      "name": "color",
+      "variants": [
+        {
+          "name": "Space Black",
+          "price": "420.00",
+          "image": null
+        },
+        {
+          "name": "Deep Purple",
+          "price": "379.00",
+          "image": null
+        },
+        {
+          "name": "Silver",
+          "price": "378.00",
+          "image": null
+        },
+        {
+          "name": "Gold",
+          "price": null,
+          "image": null
+        }
+      ]
+    }
+  ],
+  "productId": "393000c0-1f19-43fc-9f89-e6faf3f3bd46"
+}

@@ -1,0 +1,57 @@
+{
+  "title": "Back Market JavaScript - Nuxt",
+  "type": "object",
+  "schemaVersion": 1,
+  "required": [
+    "url"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "url": {
+      "title": "URL del producto",
+      "type": "string",
+      "description": "HTTPS www.backmarket.com/en-us/p/slug/UUID. Parametros l y offerType admitidos.",
+      "editor": "textfield",
+      "prefill": ""
+    },
+    "outputFormat": {
+      "title": "Formato de salida",
+      "type": "string",
+      "description": "Un producto agregado con once campos.",
+      "enum": [
+        "reference1688"
+      ],
+      "default": "reference1688"
+    },
+    "diagnosticMode": {
+      "title": "Diagnostico extendido",
+      "type": "boolean",
+      "description": "Normal: 55 s de proceso y 48 s de adquisicion. Diagnostico: limite configurable hasta 180 s.",
+      "default": false
+    },
+    "diagnosticTimeoutSeconds": {
+      "title": "Limite de diagnostico (s)",
+      "type": "integer",
+      "description": "Solo se aplica en diagnostico. Configura el timeout del run de Apify acorde a este valor.",
+      "minimum": 30,
+      "maximum": 180,
+      "default": 180
+    },
+    "proxyConfiguration": {
+      "sectionCaption": "Red opcional - acceso autorizado",
+      "title": "Apify Proxy",
+      "type": "object",
+      "description": "Desactivado por defecto. Datacenter, RESIDENTIAL o UNBLOCKER solo. Sin URLs privadas ni reintentos. TLS permanece verificado.",
+      "editor": "proxy",
+      "default": {
+        "useApifyProxy": false
+      }
+    },
+    "proxyAccessAuthorized": {
+      "title": "Confirmo autorizacion de acceso y presupuesto",
+      "type": "boolean",
+      "description": "Declaracion del usuario sobre los permisos del proveedor y el grupo disponible; no concede permisos externos.",
+      "default": false
+    }
+  }
+}

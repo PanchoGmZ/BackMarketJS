@@ -1,0 +1,23 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Back Market JS — Extraer producto",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/main.js",
+      "args": [
+        "--input",
+        "storage/key_value_stores/default/INPUT.json"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "skipFiles": [
+        "<node_internals>/**"
+      ],
+      "env": {
+        "CRAWLEE_STORAGE_DIR": "${workspaceFolder}/storage"
+      }
+    }
+  ]
+}

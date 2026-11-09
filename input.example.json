@@ -1,0 +1,10 @@
+{
+  "url": "",
+  "outputFormat": "reference1688",
+  "diagnosticMode": false,
+  "diagnosticTimeoutSeconds": 180,
+  "proxyConfiguration": {
+    "useApifyProxy": false
+  },
+  "proxyAccessAuthorized": false
+}

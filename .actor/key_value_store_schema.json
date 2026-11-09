@@ -1,0 +1,84 @@
+{
+  "actorKeyValueStoreSchemaVersion": 1,
+  "title": "Estado y metadatos",
+  "collections": {
+    "runState": {
+      "key": "RUN_STATE",
+      "title": "Estado de la ejecucion",
+      "contentTypes": [
+        "application/json"
+      ],
+      "jsonSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "success",
+              "partial",
+              "blocked",
+              "error",
+              "aborted"
+            ]
+          },
+          "savedResults": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "extractionPerformed": {
+            "type": "boolean"
+          },
+          "acquisition": {
+            "type": "object"
+          },
+          "timings": {
+            "type": "object"
+          },
+          "error": {
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "savedResults",
+          "extractionPerformed"
+        ]
+      }
+    },
+    "metadata": {
+      "key": "PRODUCT_METADATA",
+      "title": "Moneda, precios, peso y variantes",
+      "contentTypes": [
+        "application/json"
+      ],
+      "jsonSchema": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "variantGroups": {
+            "type": "array"
+          },
+          "priceVerification": {
+            "type": "object"
+          },
+          "weightNormalization": {
+            "type": "object"
+          },
+          "sourceDiagnostics": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  }
+}
