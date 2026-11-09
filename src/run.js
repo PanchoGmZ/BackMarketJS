@@ -47,7 +47,7 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
         const settings = proxySettings(input);
         state.proxy = { ...settings, status: settings.enabled ? 'pending' : 'disabled', connected: null, documentRequestSucceeded: null };
         await actor.setValue('RUN_STATE', state);
-        event('LIMITES', { ...state.timeBudget, diagnosticMode: input.diagnosticMode, tlsVerified: true });
+        event('LIMITES', { ...state.timeBudget, diagnosticMode: input.diagnosticMode });
         let html, responses = {};
         if (offlineHtml === undefined) {
             state.stage = 'proxy-setup';
@@ -56,7 +56,7 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
             event('PROXY', { enabled: settings.enabled, mode: settings.mode, groups: settings.groups,
                 country: settings.country, status: state.proxy.status, connected: null });
             state.stage = 'acquisition';
-            const result = await timed('acquisition', () => acquireFn(input, { proxy, budget, signal: controller.signal }));
+            const result = await timed('acquisition', () => acquireFn(input, { proxy, proxyMode: settings.mode, budget, signal: controller.signal }));
             html = result.html; responses = result.responses; state.acquisition = result.acquisition;
             const document = state.acquisition.requests?.filter(r => r.category === 'document').at(-1);
             state.proxy.connected = document ? document.httpStatus !== 407 : null;

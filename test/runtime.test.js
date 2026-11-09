@@ -93,7 +93,7 @@ test('normal and diagnostic budgets share process age',()=>{
     b.configure(parseInput({url:expected.url,diagnosticMode:true}));assert.equal(b.remaining(b.acquisition),140000);
     age=180001;assert.equal(b.remaining(b.total),0);b.stop();
 });
-async function browserFixture(status,{optional=false}={}) {
+async function browserFixture(status,{optional=false,proxyMode='direct'}={}) {
     const page=new EventEmitter();let calls=0,contextOptions;
     page.route=async()=>{};page.mainFrame=()=>page;page.url=()=>expected.url;page.content=async()=>html;
     const request=()=>({isNavigationRequest:()=>true,frame:()=>page});
@@ -108,15 +108,21 @@ async function browserFixture(status,{optional=false}={}) {
     };
     const browser={newContext:async options=>{contextOptions=options;return{newPage:async()=>page};},close:async()=>{}};
     const budget=clock();budget.configure(parseInput({url:expected.url}));
-    const result=await acquire(parseInput({url:expected.url}),{budget,browserType:{launch:async()=>browser}});
+    const result=await acquire(parseInput({url:expected.url}),{budget,proxyMode,browserType:{launch:async()=>browser}});
     budget.stop();return{result,calls,contextOptions};
 }
-test('main document 502 is acquisition error; 403 remains blocked; TLS always verified',async()=>{
+test('main document 502 is acquisition error; 403 remains blocked; only Unblocker disables TLS verification',async()=>{
     for(const status of [502,403]){
         const {result,calls,contextOptions}=await browserFixture(status);
         assert.equal(result.acquisition.error.code,'HTTP_'+status);
         assert.equal(result.acquisition.resourceErrors.length,0);assert.equal(calls,1);
         assert.equal(contextOptions.ignoreHTTPSErrors,false);
+    }
+    for(const proxyMode of ['direct','datacenter','residential','unblocker']){
+        const {result,contextOptions}=await browserFixture(200,{proxyMode});
+        const insecure=proxyMode==='unblocker';
+        assert.equal(contextOptions.ignoreHTTPSErrors,insecure);
+        assert.equal(result.acquisition.tlsVerified,!insecure);
     }
 });
 test('review 403 does not discard valid HTML and never causes another navigation',async()=>{

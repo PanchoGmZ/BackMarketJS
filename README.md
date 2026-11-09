@@ -75,7 +75,7 @@ Apify Proxy esta apagado por defecto. Para una fuente autorizada, selecciona gru
 - configured solo acredita la configuracion del SDK. connected requiere una respuesta HTTP observada del documento; HTTP 200 no acredita por si solo una extraccion valida.
 - Los servicios pueden generar cargos; el tiempo y la memoria NO constituyen un presupuesto monetario. No se activan automaticamente.
 
-TLS permanece verificado en TODOS los modos (ignoreHTTPSErrors=false). La excepcion insegura que utilizaba el prototipo Python con Unblocker NO se porta. Si Unblocker presenta una CA no reconocida, esta version se detendra con TLS_ERROR hasta disponer de una solucion de confianza oficial verificada. No se instalan certificados arbitrarios.
+TLS se verifica en conexion directa y Residential (`ignoreHTTPSErrors=false`). Solo con UNBLOCKER se establece `ignoreHTTPSErrors=true` en el contexto real de Playwright y se registra `[TLS] verified=false`; es una excepcion temporal de diagnostico para observar la respuesta posterior al error de CA. En ese modo Chromium no valida la identidad HTTPS del servidor. No es seguro para produccion ni debe considerarse una solucion de confianza TLS. No se modifica la verificacion TLS de los otros modos.
 
 Documentacion: https://docs.apify.com/sdk/js/docs/concepts/proxy-management
 y https://docs.apify.com/proxy/unblocker

@@ -11,10 +11,11 @@ function visibleChallenge(html) {
     $('script,style,noscript').remove();
     return /just a moment|verify.*human|security verification|captcha/i.test(title) || /bot-need-challenge/i.test($('body').text());
 }
-export async function acquire(input, { proxy = null, budget, signal, browserType = chromium } = {}) {
+export async function acquire(input, { proxy = null, proxyMode = 'direct', budget, signal, browserType = chromium } = {}) {
     const started = performance.now(), remaining = () => Math.min(budget.remaining(budget.acquisition), budget.remaining());
+    const tlsVerified = proxyMode !== 'unblocker';
     const report = { status: 'running', navigationCount: 0, directApiRequests: 0, requests: [], redirects: [],
-        resourceErrors: [], navigationFailures: [], browserClosed: false, stage: 'browser-start', tlsVerified: true };
+        resourceErrors: [], navigationFailures: [], browserClosed: false, stage: 'browser-start', tlsVerified };
     let browser, context, page, html = '', accepted = false, closing = false;
     const responses = {}, tasks = new Set(), ready = deferred(), stopped = deferred(), deniedOptional = new Set();
     const origin = new URL(input.url).origin, base = '/product-page/products/' + input.productId;
@@ -73,8 +74,8 @@ export async function acquire(input, { proxy = null, budget, signal, browserType
         launch.then(b => { if (closing) b.close().catch(() => {}); }, () => {});
         browser = await bounded(launch, remaining() - 2000, signal, 'browser-start');
         report.browserStartupSeconds = (performance.now() - started) / 1000;
-        event('TLS', { verified: true, insecurePrototypeSettingMigrated: false });
-        context = await bounded(browser.newContext({ ignoreHTTPSErrors: false }), remaining() - 2000, signal, 'context-start');
+        context = await bounded(browser.newContext({ ignoreHTTPSErrors: !tlsVerified }), remaining() - 2000, signal, 'context-start');
+        event('TLS', { verified: tlsVerified });
         page = await context.newPage();
         // Bind events and routes before the only Page.goto().
         await page.route('**/*', async route => {
