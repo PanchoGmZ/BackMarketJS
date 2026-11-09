@@ -20,7 +20,7 @@ Introduce una ficha HTTPS completa de www.backmarket.com/en-us/p/slug/UUID. Se a
       "outputFormat": "reference1688",
       "diagnosticMode": false,
       "diagnosticTimeoutSeconds": 180,
-      "proxyConfiguration": { "useApifyProxy": false },
+      "proxyConfiguration": { "useApifyProxy": true, "apifyProxyGroups": ["UNBLOCKER"] },
       "proxyAccessAuthorized": false
     }
 
@@ -58,7 +58,7 @@ Exactamente once campos: url, title, price, productLadderPrices, moq, weight, di
 - currency, oferta, disponibilidad, IDs, seleccion y procedencia del peso: PRODUCT_METADATA, fuera de los once campos.
 - weight: {value,unit:"kg"} o null. Conversion explicita de g/kg/oz/lb, limites de plausibilidad por tipo de producto y exclusion del peso de envio. Solo el modelo estructurado exacto Apple/iPhone 15 Plus admite la referencia oficial de 201 g; nunca se aplica a otro modelo.
 - moq y dimensions: null; precios escalonados: []. La forma null/array de cada campo conserva el contrato Python.
-- Identidad no verificada o documento de verificacion: no se guarda un producto inventado. Datos incompletos verificables: partial. Errores y bloqueos: diagnosticos separados. Un producto HTTP 200 previo y ya valido puede conservarse con estado blocked/error si ocurre un fallo posterior.
+- Identidad o precio seleccionado no verificados: error y no se guarda el producto. Un producto live con identidad y precio seleccionados verificados se guarda una vez y termina con exit code 0 aunque las opciones alternativas tengan metadatos incompletos; `RUN_STATE.status` y `PRODUCT_METADATA.missingFields` mantienen `partial` y la lista de advertencias. Fallos de persistencia son errores. Un producto HTTP 200 previo y ya valido puede conservarse con estado blocked/error si ocurre un fallo posterior.
 
 No se guardan HTML completo, configuracion de pagos, cookies, perfiles ni credenciales. Los fixtures HTML son capturas comerciales filtradas ya existentes.
 
@@ -68,7 +68,7 @@ Una sola page.goto() con domcontentloaded, sin networkidle, reintentos, navegaci
 
 Documento principal o fuente comercial con 401/403 o desafio explicito: parada. HTTP 502 del documento: error de adquisicion. Reseñas 403: error opcional, sin descartar el producto. /testchallengepage: ACCESS_CHALLENGE. No se implementa resolucion de desafios, cambio de identidad ni rotacion de IP ante una denegacion.
 
-Apify Proxy esta apagado por defecto. Para una fuente autorizada, selecciona grupos disponibles en la cuenta y confirma proxyAccessAuthorized. El SDK usa la autenticacion del entorno Apify; no se admiten URLs privadas ni credenciales en el input.
+UNBLOCKER queda seleccionado por defecto, tanto en el formulario como cuando falta `proxyConfiguration` en la entrada. Puedes desactivarlo (`useApifyProxy:false`) o elegir otro grupo; una configuracion explicita tiene prioridad. Confirma `proxyAccessAuthorized` para declarar que el uso esta autorizado y presupuestado. `Actor.createProxyConfiguration()` valida el acceso al grupo mediante el SDK. Si el grupo no esta habilitado para la cuenta, el Actor falla con `APIFY_PROXY_GROUP_UNAVAILABLE`, sin cambiar a conexion directa ni a otro proxy. El SDK usa la autenticacion del entorno Apify; no se admiten URLs privadas ni credenciales en el input.
 
 - Datacenter y RESIDENTIAL: una URL y una sesion interna por trabajo.
 - UNBLOCKER: grupo unico y newUrl() SIN sessionId. No se mezcla con Residential ni se garantiza IP persistente.

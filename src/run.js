@@ -44,7 +44,7 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
         state.executionMode = offlineHtml === undefined ? 'live' : 'offline';
         state.timeBudget = { processSeconds: budget.total / 1000, acquisitionSeconds: budget.acquisition / 1000, workSeconds: budget.work / 1000 };
         workTimer = setTimeout(() => controller.abort(), budget.remaining());
-        const settings = proxySettings(input);
+        const settings = proxySettings(input, { requireAuthorization: offlineHtml === undefined });
         state.proxy = { ...settings, status: settings.enabled ? 'pending' : 'disabled', connected: null, documentRequestSucceeded: null };
         await actor.setValue('RUN_STATE', state);
         event('LIMITES', { ...state.timeBudget, diagnosticMode: input.diagnosticMode });
@@ -80,7 +80,7 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
         const identity = commercial.product?.productId?.toLowerCase() === input.productId;
         state.productDocument = { verified: Boolean(identity && output.title), uuidMatches: identity, titleFound: Boolean(output.title) };
         event('DOCUMENTO_PRODUCTO', state.productDocument);
-        if (!identity || !output.title) throw new ExtractionError('PRODUCT_IDENTITY_UNVERIFIED', 'transformation', 'partial');
+        if (!identity || !output.title) throw new ExtractionError('PRODUCT_IDENTITY_UNVERIFIED', 'transformation', 'error');
         const pageSelection = state.acquisition.pageSelection;
         if (pageSelection) {
             metadata.pageSelection = pageSelection;
@@ -93,12 +93,15 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
             }
         }
         assertProduct(output);
+        if (metadata.priceVerification?.status !== 'verified' || output.price === null)
+            throw new ExtractionError('SELECTED_PRICE_UNVERIFIED', 'transformation', 'error');
         if (controller.signal.aborted) throw new ExtractionError('RUN_TIME_LIMIT', state.stage, 'error');
         if (retainedFailure && !(output.price !== null && output.images?.length && metadata.priceVerification.status === 'verified'))
             throw new ExtractionError(retainedFailure.error.code, state.acquisition.failureStage ?? 'acquisition', retainedFailure.status);
         state.status = retainedFailure?.status ?? (offlineHtml === undefined && !missing.length ? 'success' : 'partial');
         state.error = retainedFailure?.error ?? null; state.missingFields = missing;
-        exitCode = state.status === 'success' ? 0 : 1;
+        metadata.missingFields = missing;
+        metadata.sourceDiagnostics.missingFields = missing;
         metadata.executionMode = state.executionMode; metadata.extractionPerformed = state.extractionPerformed; metadata.status = state.status;
         event('PRECIO_VERIFICADO', metadata.priceVerification);
         event('PESO', { valueKg: metadata.weightNormalization.valueKg, source: metadata.weightNormalization.source,
@@ -114,9 +117,14 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
             }
         });
         state.savedResults = 1;
+        const usableLiveProduct = offlineHtml === undefined && !retainedFailure && state.productDocument.verified
+            && metadata.priceVerification.status === 'verified' && output.price !== null && state.savedResults === 1;
+        exitCode = usableLiveProduct ? 0 : 1;
         state.counts = { images: output.images?.length ?? 0, characteristics: output.characteristics?.length ?? 0,
             groups: output.variations?.length ?? 0, options: output.variations?.reduce((n,g) => n + g.variants.length,0) ?? 0 };
         event('GUARDADO', { dataset: offlineHtml === undefined ? 'default' : 'offline-validation', records: 1, fields: 11 });
+        if (state.status === 'partial' && usableLiveProduct)
+            event('PRODUCTO_PARCIAL_UTILIZABLE', { status: state.status, missingFields: missing, savedResults: state.savedResults }, 'warning');
         state.stage = 'finished';
     } catch (error) {
         const diagnosis = error instanceof ExtractionError ? { code: error.code, stage: error.stage }

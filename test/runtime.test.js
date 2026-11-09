@@ -10,12 +10,16 @@ import { proxySettings, configureProxy } from '../src/proxy.js';
 import { parseInput } from '../src/input.js';
 import { acquire } from '../src/browser.js';
 import { classifyHttp, navigationFailure } from '../src/diagnostics.js';
+import { extractHtml } from '../src/extract.js';
 log.setLevel(log.LEVELS.OFF);
 const id = 'eda80a12-a40b-4faa-b0f6-438bea90f1e5';
 const html = readFileSync(new URL('./fixtures/reference/' + id + '/commercial.html',import.meta.url),'utf8');
 const expected = JSON.parse(readFileSync(new URL('./fixtures/reference/' + id + '/python-output.json',import.meta.url),'utf8'));
+const partialId = '393000c0-1f19-43fc-9f89-e6faf3f3bd46';
+const partialHtml = readFileSync(new URL('./fixtures/reference/' + partialId + '/commercial.html',import.meta.url),'utf8');
+const partialExpected = JSON.parse(readFileSync(new URL('./fixtures/reference/' + partialId + '/python-output.json',import.meta.url),'utf8'));
 class FakeActor {
-    constructor(input = {url:expected.url}) { this.input=input; this.values={}; this.records=[]; this.offline=[]; this.listeners={}; this.exits=[]; }
+    constructor(input = {url:expected.url,proxyConfiguration:{useApifyProxy:false}}) { this.input=input; this.values={}; this.records=[]; this.offline=[]; this.listeners={}; this.exits=[]; }
     async init() {}
     async getInput() { return this.input; }
     async setValue(k,v) { this.values[k]=structuredClone(v); if(k==='INPUT')this.input=v; }
@@ -32,6 +36,29 @@ test('valid live acquisition pushes exactly one aggregate via default Dataset', 
     assert.equal(result.state.status,'success'); assert.equal(result.exitCode,0);
     assert.deepEqual(actor.records,[expected]); assert.equal(actor.values.RUN_STATE.savedResults,1);
     assert.equal(actor.values.PRODUCT_METADATA.currency,'USD');
+});
+test('valid product with incomplete optional variants stays partial but exits successfully after save',async()=>{
+    const actor=new FakeActor({url:partialExpected.url,proxyConfiguration:{useApifyProxy:false}});
+    const result=await runActor({actor,budget:clock(),acquireFn:async()=>({html:partialHtml,responses:{},acquisition:{status:'received',requests:[],navigationCount:1}})});
+    assert.equal(result.state.status,'partial');assert.equal(result.exitCode,0);
+    assert.equal(result.state.savedResults,1);assert.equal(actor.records.length,1);
+    assert.ok(result.state.missingFields.some(field=>field.startsWith('variantMetadata[')));
+    assert.deepEqual(result.metadata.missingFields,result.state.missingFields);
+    assert.deepEqual(result.metadata.sourceDiagnostics.missingFields,result.state.missingFields);
+});
+test('unverified selected price is an error and never reaches the Dataset',async()=>{
+    const actor=new FakeActor();
+    const parsed=extractHtml(html,{...parseInput({url:expected.url,proxyConfiguration:{useApifyProxy:false}})});
+    const commercial=structuredClone(parsed.commercial);commercial.pickers.selectedOffer.price.amount=null;
+    const result=await runActor({actor,budget:clock(),acquireFn:async()=>({html:'',responses:commercial,acquisition:{status:'received',requests:[],navigationCount:1}})});
+    assert.equal(result.state.status,'error');assert.equal(result.state.error.code,'SELECTED_PRICE_UNVERIFIED');
+    assert.equal(result.exitCode,1);assert.equal(actor.records.length,0);assert.equal(result.state.savedResults,0);
+});
+test('Dataset persistence failure remains Failed even for a verified product',async()=>{
+    const actor=new FakeActor();actor.pushData=async()=>{throw new Error('offline storage failure');};
+    const result=await runActor({actor,budget:clock(),acquireFn:async()=>success()});
+    assert.equal(result.state.status,'error');assert.equal(result.state.error.code,'PERSISTENCE_ERROR');
+    assert.equal(result.exitCode,1);assert.equal(result.state.savedResults,0);
 });
 test('blocked navigation keeps diagnostics and never pushes invented rows', async () => {
     const actor=new FakeActor();
@@ -51,11 +78,12 @@ test('offline run uses separate dataset and never claims real extraction',async(
     assert.equal(result.state.status,'partial'); assert.equal(result.state.extractionPerformed,false);
     assert.equal(actor.records.length,0); assert.deepEqual(actor.offline,[expected]);
 });
-test('selection removed on redirect clears price and returns partial',async()=>{
+test('selection removed on redirect clears price and is rejected as unverifiable',async()=>{
     const actor=new FakeActor();
     const data=success(); data.acquisition.pageSelection={requested:{l:'12'},final:{},status:'changed_or_removed'};
     const result=await runActor({actor,budget:clock(),acquireFn:async()=>data});
-    assert.equal(result.state.status,'partial'); assert.equal(actor.records[0].price,null);
+    assert.equal(result.state.status,'error'); assert.equal(result.state.error.code,'SELECTED_PRICE_UNVERIFIED');
+    assert.equal(result.exitCode,1);assert.equal(actor.records.length,0);
 });
 test('parser identity errors remain separate from network errors',async()=>{
     const actor=new FakeActor();
@@ -78,6 +106,23 @@ test('direct, Residential and Unblocker SDK configuration has one coherent sessi
     }
     assert.throws(()=>proxySettings({proxyConfiguration:{useApifyProxy:true,apifyProxyGroups:['UNBLOCKER','RESIDENTIAL']},proxyAccessAuthorized:true}));
     assert.throws(()=>proxySettings({proxyConfiguration:{useApifyProxy:true,apifyProxyGroups:['UNBLOCKER']}}));
+});
+test('missing proxy input defaults to Unblocker; explicit direct and Residential selections win',()=>{
+    const defaults=parseInput({url:expected.url,proxyAccessAuthorized:true});
+    assert.deepEqual(defaults.proxyConfiguration,{useApifyProxy:true,apifyProxyGroups:['UNBLOCKER']});
+    assert.equal(proxySettings(defaults).mode,'unblocker');
+    const direct=parseInput({url:expected.url,proxyAccessAuthorized:true,proxyConfiguration:{useApifyProxy:false}});
+    assert.equal(proxySettings(direct).mode,'direct');
+    const residential=parseInput({url:expected.url,proxyAccessAuthorized:true,
+        proxyConfiguration:{useApifyProxy:true,apifyProxyGroups:['RESIDENTIAL']}});
+    assert.equal(proxySettings(residential).mode,'residential');
+});
+test('unavailable proxy group has a specific error and no direct fallback',async()=>{
+    const settings=proxySettings({proxyConfiguration:{useApifyProxy:true,apifyProxyGroups:['UNBLOCKER']},proxyAccessAuthorized:true});
+    await assert.rejects(()=>configureProxy({createProxyConfiguration:async()=>undefined},settings),
+        error=>error.code==='APIFY_PROXY_GROUP_UNAVAILABLE');
+    await assert.rejects(()=>configureProxy({createProxyConfiguration:async()=>{throw new Error('Access denied for Apify Proxy group');}},settings),
+        error=>error.code==='APIFY_PROXY_GROUP_UNAVAILABLE');
 });
 test('transport errors are safely normalized without credentials',()=>{
     const d=navigationFailure('Page.goto: net::ERR_TOO_MANY_RETRIES password=PRIVATE https://user:secret@proxy.invalid');

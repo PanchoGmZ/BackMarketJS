@@ -41,10 +41,13 @@
       "sectionCaption": "Red opcional - acceso autorizado",
       "title": "Apify Proxy",
       "type": "object",
-      "description": "Desactivado por defecto. Datacenter, RESIDENTIAL o UNBLOCKER solo. Sin URLs privadas ni reintentos. En UNBLOCKER la verificacion TLS se desactiva temporalmente para diagnostico.",
+      "description": "UNBLOCKER seleccionado por defecto. Puedes desactivarlo o elegir otro grupo. Requiere confirmar autorizacion y presupuesto. Sin URLs privadas ni reintentos. En UNBLOCKER TLS no valida la identidad HTTPS; modo temporal de diagnostico, no seguro para produccion.",
       "editor": "proxy",
       "default": {
-        "useApifyProxy": false
+        "useApifyProxy": true,
+        "apifyProxyGroups": [
+          "UNBLOCKER"
+        ]
       }
     },
     "proxyAccessAuthorized": {

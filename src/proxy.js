@@ -1,8 +1,9 @@
 
 import { randomUUID } from 'node:crypto';
 import { ExtractionError, record } from './values.js';
-export function proxySettings(input) {
-    const config = input.proxyConfiguration ?? { useApifyProxy: false }, authorized = input.proxyAccessAuthorized ?? false;
+export function proxySettings(input, { requireAuthorization = true } = {}) {
+    const config = input.proxyConfiguration ?? { useApifyProxy: true, apifyProxyGroups: ['UNBLOCKER'] };
+    const authorized = input.proxyAccessAuthorized ?? false;
     if (!record(config) || typeof authorized !== 'boolean'
         || Object.keys(config).some(k => !['useApifyProxy', 'apifyProxyGroups', 'apifyProxyCountry', 'proxyUrls'].includes(k)))
         throw new ExtractionError('INVALID_PROXY_CONFIGURATION', 'proxy-setup');
@@ -13,7 +14,7 @@ export function proxySettings(input) {
         || groups.some(g => typeof g !== 'string' || !/^[A-Za-z0-9._~]{1,64}$/.test(g))
         || (country !== null && (typeof country !== 'string' || !/^[A-Z]{2}$/.test(country))))
         throw new ExtractionError('INVALID_PROXY_CONFIGURATION', 'proxy-setup');
-    if (enabled && !authorized) throw new ExtractionError('PROXY_AUTHORIZATION_REQUIRED', 'proxy-setup');
+    if (enabled && requireAuthorization && !authorized) throw new ExtractionError('PROXY_AUTHORIZATION_REQUIRED', 'proxy-setup');
     if (enabled && (!groups.length || groups.some(g => g.toUpperCase() === 'GOOGLE_SERP')))
         throw new ExtractionError('INVALID_PROXY_GROUP', 'proxy-setup');
     for (const special of ['RESIDENTIAL', 'UNBLOCKER'])
@@ -28,11 +29,17 @@ export async function configureProxy(actor, settings) {
     try {
         const config = await actor.createProxyConfiguration({ useApifyProxy: true, groups: settings.groups,
             ...(settings.country ? { countryCode: settings.country } : {}) });
-        if (!config) throw new Error();
+        if (!config) throw new ExtractionError('APIFY_PROXY_GROUP_UNAVAILABLE', 'proxy-setup');
         // One generated proxy URL per job. UNBLOCKER never receives a session.
         const value = settings.mode === 'unblocker' ? await config.newUrl() : await config.newUrl(randomUUID().replaceAll('-', ''));
         const url = new URL(value);
         if (!['http:', 'https:'].includes(url.protocol) || !url.hostname) throw new Error();
         return { server: url.origin, username: decodeURIComponent(url.username), password: decodeURIComponent(url.password) };
-    } catch { throw new ExtractionError('PROXY_CONFIGURATION_ERROR', 'proxy-setup'); }
+    } catch (error) {
+        if (error instanceof ExtractionError) throw error;
+        const message = typeof error?.message === 'string' ? error.message : '';
+        if (/(?:you\s+(?:do\s+not|don't|dont)\s+have\s+access|access\s+denied|not\s+authorized|not\s+permitted|forbidden).{0,100}(?:apify\s+)?proxy|(?:apify\s+)?proxy.{0,100}(?:not\s+available|unavailable|not\s+enabled|access\s+denied|forbidden)/i.test(message))
+            throw new ExtractionError('APIFY_PROXY_GROUP_UNAVAILABLE', 'proxy-setup');
+        throw new ExtractionError('PROXY_CONFIGURATION_ERROR', 'proxy-setup');
+    }
 }

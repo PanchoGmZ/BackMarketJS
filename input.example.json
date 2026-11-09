@@ -4,7 +4,10 @@
   "diagnosticMode": false,
   "diagnosticTimeoutSeconds": 180,
   "proxyConfiguration": {
-    "useApifyProxy": false
+    "useApifyProxy": true,
+    "apifyProxyGroups": [
+      "UNBLOCKER"
+    ]
   },
   "proxyAccessAuthorized": false
 }

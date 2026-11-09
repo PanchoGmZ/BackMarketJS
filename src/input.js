@@ -39,7 +39,8 @@ export function parseInput(raw, env = process.env) {
     const allowed = new Set(['url', 'outputFormat', 'diagnosticMode', 'diagnosticTimeoutSeconds', 'proxyConfiguration', 'proxyAccessAuthorized']);
     if (Object.keys(raw).some(k => !allowed.has(k))) throw new ExtractionError('UNKNOWN_INPUT_FIELD', 'input');
     const value = { outputFormat: 'reference1688', diagnosticMode: false, diagnosticTimeoutSeconds: 180,
-        proxyConfiguration: { useApifyProxy: false }, proxyAccessAuthorized: false, ...raw };
+        proxyConfiguration: { useApifyProxy: true, apifyProxyGroups: ['UNBLOCKER'] },
+        proxyAccessAuthorized: false, ...raw };
     if (typeof value.url !== 'string' || value.outputFormat !== 'reference1688'
         || typeof value.diagnosticMode !== 'boolean' || !Number.isInteger(value.diagnosticTimeoutSeconds)
         || value.diagnosticTimeoutSeconds < 30 || value.diagnosticTimeoutSeconds > 180) throw new ExtractionError('INVALID_INPUT', 'input');
