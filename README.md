@@ -77,6 +77,8 @@ UNBLOCKER queda seleccionado por defecto, tanto en el formulario como cuando fal
 
 TLS se verifica en conexion directa y Residential (`ignoreHTTPSErrors=false`). Solo con UNBLOCKER se establece `ignoreHTTPSErrors=true` en el contexto real de Playwright y se registra `[TLS] verified=false`; es una excepcion temporal de diagnostico para observar la respuesta posterior al error de CA. En ese modo Chromium no valida la identidad HTTPS del servidor. No es seguro para produccion ni debe considerarse una solucion de confianza TLS. No se modifica la verificacion TLS de los otros modos.
 
+`ERR_TOO_MANY_RETRIES` conserva causa subyacente `undetermined`. La [definicion de Chromium](https://chromium.googlesource.com/chromium/src/+/main/net/base/net_error_list.h) contempla reintentos internos por autenticacion o certificados y posibles fallos de su pila de red; el codigo solo no demuestra bloqueo de IP ni identifica cual ocurrio. No se agregan reintentos del Actor. En `RUN_STATE.acquisition.navigationError` se guardan categoria, origen, duracion, respuestas HTTP del documento y senales de `requestfailed`. `[PROXY_TRANSPORTE]` registra solo presencia de los campos de autenticacion, nunca sus valores; no acredita autenticacion exitosa. Compara esos datos y el build/input entre runs correctos y fallidos.
+
 Documentacion: https://docs.apify.com/sdk/js/docs/concepts/proxy-management
 y https://docs.apify.com/proxy/unblocker
 

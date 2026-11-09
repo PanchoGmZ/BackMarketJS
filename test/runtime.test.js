@@ -124,9 +124,28 @@ test('unavailable proxy group has a specific error and no direct fallback',async
     await assert.rejects(()=>configureProxy({createProxyConfiguration:async()=>{throw new Error('Access denied for Apify Proxy group');}},settings),
         error=>error.code==='APIFY_PROXY_GROUP_UNAVAILABLE');
 });
+test('SDK proxy credentials are decoded once into the separate Playwright fields',async()=>{
+    const settings=proxySettings({proxyAccessAuthorized:true});
+    const username='groups-UNBLOCKER',password='PRIVATE:@%+ value';
+    const proxy=await configureProxy({createProxyConfiguration:async options=>{
+        assert.deepEqual(options,{useApifyProxy:true,groups:['UNBLOCKER']});
+        return{newUrl:async(...args)=>{assert.equal(args.length,0);
+            return 'http://'+encodeURIComponent(username)+':'+encodeURIComponent(password)+'@proxy.invalid:8000';}};
+    }},settings);
+    assert.deepEqual(proxy,{server:'http://proxy.invalid:8000',username,password});
+});
 test('transport errors are safely normalized without credentials',()=>{
     const d=navigationFailure('Page.goto: net::ERR_TOO_MANY_RETRIES password=PRIVATE https://user:secret@proxy.invalid');
     assert.equal(d.code,'CHROMIUM_ERR_TOO_MANY_RETRIES');assert.equal(JSON.stringify(d).includes('secret'),false);
+    assert.equal(d.category,'retry-exhaustion');assert.equal(d.underlyingCause,'undetermined');
+    for(const signal of ['ERR_PROXY_AUTH_REQUESTED','ERR_PROXY_AUTH_UNSUPPORTED','ERR_PROXY_AUTH_REQUESTED_WITH_NO_CONNECTION','ERR_UNEXPECTED_PROXY_AUTH']){
+        const diagnosis=navigationFailure('Page.goto: net::'+signal);
+        assert.equal(diagnosis.code,'PROXY_AUTH_ERROR');assert.equal(diagnosis.category,'proxy-authentication');
+    }
+    assert.equal(navigationFailure('net::ERR_INVALID_AUTH_CREDENTIALS').category,'authentication');
+    assert.equal(navigationFailure('net::ERR_CERT_AUTHORITY_INVALID').category,'tls');
+    assert.equal(navigationFailure('net::ERR_TUNNEL_CONNECTION_FAILED').category,'proxy-tunnel');
+    assert.equal(navigationFailure('net::ERR_PROXY_CONNECTION_FAILED').category,'proxy-connection');
     assert.equal(classifyHttp('document',502).code,'HTTP_502');
     assert.equal(classifyHttp('document',403).status,'blocked');
     assert.equal(classifyHttp('optional',403),null);
@@ -138,12 +157,16 @@ test('normal and diagnostic budgets share process age',()=>{
     b.configure(parseInput({url:expected.url,diagnosticMode:true}));assert.equal(b.remaining(b.acquisition),140000);
     age=180001;assert.equal(b.remaining(b.total),0);b.stop();
 });
-async function browserFixture(status,{optional=false,proxyMode='direct'}={}) {
-    const page=new EventEmitter();let calls=0,contextOptions;
+async function browserFixture(status,{optional=false,proxyMode='direct',proxy=null,failureCode=null}={}) {
+    const page=new EventEmitter();let calls=0,contextOptions,launchOptions;
     page.route=async()=>{};page.mainFrame=()=>page;page.url=()=>expected.url;page.content=async()=>html;
     const request=()=>({isNavigationRequest:()=>true,frame:()=>page});
     page.goto=async()=>{
         calls++;
+        if(failureCode){
+            page.emit('requestfailed',{...request(),failure:()=>({errorText:'net::'+failureCode})});
+            throw new Error('Page.goto: net::'+failureCode+' at https://user:PRIVATE@destination.invalid/');
+        }
         page.emit('response',{url:()=>expected.url,headers:()=>({'content-type':'text/html','cf-ray':'synthetic-ray'}),
             status:()=>status,request,frame:()=>page,body:async()=>Buffer.from(html)});
         if(optional)page.emit('response',{url:()=> 'https://www.backmarket.com/reviews/v1/products/'+id+'/reviews',
@@ -153,9 +176,34 @@ async function browserFixture(status,{optional=false,proxyMode='direct'}={}) {
     };
     const browser={newContext:async options=>{contextOptions=options;return{newPage:async()=>page};},close:async()=>{}};
     const budget=clock();budget.configure(parseInput({url:expected.url}));
-    const result=await acquire(parseInput({url:expected.url}),{budget,proxyMode,browserType:{launch:async()=>browser}});
-    budget.stop();return{result,calls,contextOptions};
+    const result=await acquire(parseInput({url:expected.url}),{budget,proxyMode,proxy,
+        browserType:{launch:async options=>{launchOptions=options;return browser;}}});
+    budget.stop();return{result,calls,contextOptions,launchOptions};
 }
+test('Unblocker retry exhaustion with no HTTP retains unknown cause and safe transport evidence',async()=>{
+    const proxy={server:'http://proxy.invalid:8000',username:'groups-UNBLOCKER',password:'PRIVATE'};
+    const {result,calls,launchOptions,contextOptions}=await browserFixture(null,
+        {proxyMode:'unblocker',proxy,failureCode:'ERR_TOO_MANY_RETRIES'});
+    const report=result.acquisition;
+    assert.equal(calls,1);assert.deepEqual(launchOptions.proxy,proxy);assert.equal(contextOptions.ignoreHTTPSErrors,true);
+    assert.equal(report.status,'error');assert.equal(report.error.code,'CHROMIUM_ERR_TOO_MANY_RETRIES');
+    assert.equal(report.requests.length,0);assert.equal(report.browserClosed,true);
+    assert.equal(report.navigationError.httpStatus,null);assert.equal(report.navigationError.documentResponsesObserved,0);
+    assert.equal(report.navigationError.underlyingCause,'undetermined');assert.equal(report.navigationError.source,'page.goto');
+    assert.deepEqual(report.navigationError.requestFailureSignals,['ERR_TOO_MANY_RETRIES']);
+    assert.equal(report.navigationFailures[0].source,'requestfailed');
+    assert.deepEqual(report.proxyTransport,{mode:'unblocker',configured:true,usernameProvided:true,passwordProvided:true,
+        credentialBinding:'playwright-launch-fields'});
+    assert.equal(JSON.stringify(report).includes('PRIVATE'),false);
+});
+test('document HTTP 407 and proxy 590 are HTTP errors, not retry exhaustion',async()=>{
+    for(const [status,code] of [[407,'PROXY_AUTH_ERROR'],[590,'APIFY_PROXY_HTTP_590']]){
+        const {result,calls}=await browserFixture(status,{proxyMode:'unblocker'});
+        assert.equal(calls,1);assert.equal(result.acquisition.error.code,code);
+        assert.equal(result.acquisition.requests[0].httpStatus,status);
+        assert.equal(result.acquisition.navigationError,undefined);
+    }
+});
 test('main document 502 is acquisition error; 403 remains blocked; only Unblocker disables TLS verification',async()=>{
     for(const status of [502,403]){
         const {result,calls,contextOptions}=await browserFixture(status);

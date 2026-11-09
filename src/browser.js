@@ -16,6 +16,9 @@ export async function acquire(input, { proxy = null, proxyMode = 'direct', budge
     const tlsVerified = proxyMode !== 'unblocker';
     const report = { status: 'running', navigationCount: 0, directApiRequests: 0, requests: [], redirects: [],
         resourceErrors: [], navigationFailures: [], browserClosed: false, stage: 'browser-start', tlsVerified };
+    report.proxyTransport = { mode: proxyMode, configured: Boolean(proxy),
+        usernameProvided: Boolean(proxy?.username), passwordProvided: Boolean(proxy?.password),
+        credentialBinding: proxy ? 'playwright-launch-fields' : 'none' };
     let browser, context, page, html = '', accepted = false, closing = false;
     const responses = {}, tasks = new Set(), ready = deferred(), stopped = deferred(), deniedOptional = new Set();
     const origin = new URL(input.url).origin, base = '/product-page/products/' + input.productId;
@@ -75,6 +78,7 @@ export async function acquire(input, { proxy = null, proxyMode = 'direct', budge
         browser = await bounded(launch, remaining() - 2000, signal, 'browser-start');
         report.browserStartupSeconds = (performance.now() - started) / 1000;
         context = await bounded(browser.newContext({ ignoreHTTPSErrors: !tlsVerified }), remaining() - 2000, signal, 'context-start');
+        event('PROXY_TRANSPORTE', report.proxyTransport);
         event('TLS', { verified: tlsVerified });
         page = await context.newPage();
         // Bind events and routes before the only Page.goto().
@@ -89,9 +93,9 @@ export async function acquire(input, { proxy = null, proxyMode = 'direct', budge
         });
         page.on('requestfailed', request => {
             if (closing || accepted || !request.isNavigationRequest() || request.frame() !== page.mainFrame()) return;
-            const diagnosis = navigationFailure(request.failure()?.errorText, 'navigation');
+            const diagnosis = navigationFailure(request.failure()?.errorText, 'navigation', 'requestfailed');
             report.navigationFailures.push(diagnosis); report.navigationFailures = report.navigationFailures.slice(-4);
-            event('REQUEST_FAILED', { code: diagnosis.code, signals: diagnosis.signals }, 'warning');
+            event('REQUEST_FAILED', { code: diagnosis.code, category: diagnosis.category, signals: diagnosis.signals }, 'warning');
         });
         page.on('response', response => {
             const url = new URL(response.url()), headers = response.headers();
@@ -137,6 +141,7 @@ export async function acquire(input, { proxy = null, proxyMode = 'direct', budge
         }).catch(() => {}); }, 1000);
         report.stage = 'navigation'; report.navigationCount = 1;
         event('NAVEGACION', { count: 1, max: 1, waitUntil: 'domcontentloaded', retries: 0 });
+        const navigationStarted = performance.now();
         const navigation = page.goto(input.url, { waitUntil: 'domcontentloaded', timeout: Math.max(1, remaining() - 2000) })
             .then(async () => {
                 if (report.error || accepted) return;
@@ -144,7 +149,11 @@ export async function acquire(input, { proxy = null, proxyMode = 'direct', budge
                 offerHtml(document, 'rendered-dom', page.url());
             }).catch(error => {
                 if (accepted || closing || report.error) return;
-                report.navigationError = navigationFailure(error);
+                const documents = report.requests.filter(r => r.category === 'document');
+                report.navigationError = { ...navigationFailure(error, 'navigation', 'page.goto'),
+                    seconds: (performance.now() - navigationStarted) / 1000,
+                    documentResponsesObserved: documents.length, httpStatus: documents.at(-1)?.httpStatus ?? null,
+                    requestFailureSignals: [...new Set(report.navigationFailures.flatMap(d => d.signals))] };
                 event('CAUSA_NAVEGACION', report.navigationError, 'warning');
                 fail(report.navigationError.code === 'TIMEOUT' ? 'partial' : 'error', report.navigationError.code);
             });
@@ -155,7 +164,7 @@ export async function acquire(input, { proxy = null, proxyMode = 'direct', budge
         } else if (!report.error) fail('partial', 'NO_HTML_RECEIVED');
     } catch (error) {
         if (!report.error) {
-            report.navigationError = navigationFailure(error, report.stage);
+            report.navigationError = navigationFailure(error, report.stage, 'acquire');
             fail(error?.status ?? 'error', report.navigationError.code, report.stage);
         }
     } finally {
