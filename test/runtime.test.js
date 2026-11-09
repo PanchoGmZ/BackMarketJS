@@ -157,9 +157,9 @@ test('normal and diagnostic budgets share process age',()=>{
     b.configure(parseInput({url:expected.url,diagnosticMode:true}));assert.equal(b.remaining(b.acquisition),140000);
     age=180001;assert.equal(b.remaining(b.total),0);b.stop();
 });
-async function browserFixture(status,{optional=false,proxyMode='direct',proxy=null,failureCode=null}={}) {
+async function browserFixture(status,{optional=false,proxyMode='direct',proxy=null,failureCode=null,documentHtml=html,bodyFailure=false}={}) {
     const page=new EventEmitter();let calls=0,contextOptions,launchOptions;
-    page.route=async()=>{};page.mainFrame=()=>page;page.url=()=>expected.url;page.content=async()=>html;
+    page.route=async()=>{};page.mainFrame=()=>page;page.url=()=>expected.url;page.content=async()=>documentHtml;
     const request=()=>({isNavigationRequest:()=>true,frame:()=>page});
     page.goto=async()=>{
         calls++;
@@ -168,7 +168,10 @@ async function browserFixture(status,{optional=false,proxyMode='direct',proxy=nu
             throw new Error('Page.goto: net::'+failureCode+' at https://user:PRIVATE@destination.invalid/');
         }
         page.emit('response',{url:()=>expected.url,headers:()=>({'content-type':'text/html','cf-ray':'synthetic-ray'}),
-            status:()=>status,request,frame:()=>page,body:async()=>Buffer.from(html)});
+            status:()=>status,request,frame:()=>page,body:async()=>{
+                if(bodyFailure)throw new Error('synthetic unreadable response');
+                return Buffer.from(documentHtml);
+            }});
         if(optional)page.emit('response',{url:()=> 'https://www.backmarket.com/reviews/v1/products/'+id+'/reviews',
             headers:()=>({'content-type':'application/json'}),status:()=>403,
             request:()=>({isNavigationRequest:()=>false}),frame:()=>page,body:async()=>Buffer.from('{}')});
@@ -222,6 +225,19 @@ test('review 403 does not discard valid HTML and never causes another navigation
     const {result,calls}=await browserFixture(200,{optional:true});
     assert.equal(result.acquisition.status,'received');assert.equal(result.html,html);
     assert.equal(result.acquisition.resourceErrors[0].category,'optional');assert.equal(calls,1);
+});
+test('HTTP 200 challenge containing commercial marker strings is rejected in response and DOM paths',async()=>{
+    const documentHtml='<html><head><title>Just a moment</title></head><body>'+id+' selectedOffer pickerGroups specifications</body></html>';
+    for(const bodyFailure of [false,true]){
+        const {result,calls}=await browserFixture(200,{documentHtml,bodyFailure});
+        assert.equal(calls,1);assert.equal(result.acquisition.status,'blocked');
+        assert.equal(result.acquisition.error.code,'ACCESS_CHALLENGE');assert.equal(result.html,'');
+    }
+});
+test('rendered DOM fallback still validates and accepts a valid product when response body is unreadable',async()=>{
+    const {result,calls}=await browserFixture(200,{bodyFailure:true});
+    assert.equal(calls,1);assert.equal(result.acquisition.status,'received');
+    assert.equal(result.acquisition.htmlSource,'rendered-dom');assert.equal(result.html,html);
 });
 
 test('aborting saves state, closes work and exits with 143 without a product',async()=>{

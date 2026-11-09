@@ -28,12 +28,12 @@ export async function acquire(input, { proxy = null, proxyMode = 'direct', budge
         report.status = status; report.failureStage = stage; report.error = { code, stage };
         event('PARADA', { status, code, stage }, 'warning'); stopped.resolve();
     }
-    function offerHtml(value, source, url) {
+    function offerHtml(value, source, url, challengeChecked = false) {
         if (report.error || accepted) return;
         const doc = report.requests.filter(r => r.category === 'document').at(-1);
         if (!doc || doc.httpStatus !== 200 || !doc.contentType.includes('text/html')) return;
         if (typeof value !== 'string' || Buffer.byteLength(value) > input.maxHtmlBytes) { fail('partial', 'HTML_TOO_LARGE'); return; }
-        if (visibleChallenge(value)) { fail('blocked', 'ACCESS_CHALLENGE', 'html-validation'); return; }
+        if (!challengeChecked && visibleChallenge(value)) { fail('blocked', 'ACCESS_CHALLENGE', 'html-validation'); return; }
         html = value; accepted = true; report.htmlSource = source; report.finalUrl = safeUrl(url);
         report.pageSelection = selectionState(input.url, url);
         report.htmlReadySeconds = (performance.now() - started) / 1000;
@@ -61,7 +61,8 @@ export async function acquire(input, { proxy = null, proxyMode = 'direct', budge
                 const document = raw.toString('utf8');
                 if (visibleChallenge(document)) { fail('blocked', 'ACCESS_CHALLENGE', 'html-validation'); return; }
                 if (document.toLowerCase().includes(input.productId) && ['selectedOffer', 'pickerGroups', 'specifications'].every(k => document.includes(k)))
-                    offerHtml(document, 'navigation-response', response.url());
+                    // This exact response body has already passed the challenge check above.
+                    offerHtml(document, 'navigation-response', response.url(), true);
             }
         } catch (error) {
             item.bodyRead = { ...item.bodyRead, status: 'failed', code: 'RESPONSE_READ_OR_VALIDATION_ERROR',
