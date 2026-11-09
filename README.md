@@ -20,6 +20,7 @@ Introduce una ficha HTTPS completa de www.backmarket.com/en-us/p/slug/UUID. Se a
       "outputFormat": "reference1688",
       "diagnosticMode": false,
       "diagnosticTimeoutSeconds": 180,
+      "disableHttp2": false,
       "proxyConfiguration": { "useApifyProxy": true, "apifyProxyGroups": ["UNBLOCKER"] },
       "proxyAccessAuthorized": false
     }
@@ -83,6 +84,8 @@ Documentacion: https://docs.apify.com/sdk/js/docs/concepts/proxy-management
 y https://docs.apify.com/proxy/unblocker
 
 ## Tiempos y recursos
+
+Experimento opcional: `disableHttp2` es `false` por defecto. Al ponerlo en `true`, se agrega unicamente `--disable-http2` a `chromium.launch({args: [...]})`, conservando los argumentos predeterminados de Playwright. `[PROXY_TRANSPORTE] http2Disabled` y `RUN_STATE.acquisition.http2Disabled` registran la opcion enviada. El [codigo oficial de Chromium](https://chromium.googlesource.com/chromium/src/+/main/components/network_session_configurator/browser/network_session_configurator.cc) desactiva HTTP/2 con ese argumento; [Playwright admite argumentos adicionales](https://playwright.dev/docs/api/class-browsertype#browser-type-launch-option-args). No se desactiva QUIC/HTTP3 ni se modifica TLS, User-Agent o proxy. El argumento no controla el protocolo entre Unblocker y el destino ni prueba cual se negocio. Para comparar, utiliza el mismo build/input y cambia solo `disableHttp2`; contrasta HTTP, errores, tiempos y producto guardado. Una diferencia aislada no demuestra que HTTP/2 cause `ERR_TOO_MANY_RETRIES`.
 
 Modo normal: maximo interno de 55 s desde el proceso/inicio Apify disponible, adquisicion hasta 48 s y trabajo hasta 52 s. Diagnostico: limite 30..180 s, adquisicion hasta total-20 s y trabajo hasta total-2 s. Apify debe tener un timeout externo acorde (55 s normal; 180 s diagnostico). Una sola pagina/concurrencia 1.
 

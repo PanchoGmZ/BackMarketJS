@@ -157,7 +157,7 @@ test('normal and diagnostic budgets share process age',()=>{
     b.configure(parseInput({url:expected.url,diagnosticMode:true}));assert.equal(b.remaining(b.acquisition),140000);
     age=180001;assert.equal(b.remaining(b.total),0);b.stop();
 });
-async function browserFixture(status,{optional=false,proxyMode='direct',proxy=null,failureCode=null,documentHtml=html,bodyFailure=false}={}) {
+async function browserFixture(status,{optional=false,proxyMode='direct',proxy=null,failureCode=null,documentHtml=html,bodyFailure=false,disableHttp2}={}) {
     const page=new EventEmitter();let calls=0,contextOptions,launchOptions;
     page.route=async()=>{};page.mainFrame=()=>page;page.url=()=>expected.url;page.content=async()=>documentHtml;
     const request=()=>({isNavigationRequest:()=>true,frame:()=>page});
@@ -178,11 +178,31 @@ async function browserFixture(status,{optional=false,proxyMode='direct',proxy=nu
         return {};
     };
     const browser={newContext:async options=>{contextOptions=options;return{newPage:async()=>page};},close:async()=>{}};
-    const budget=clock();budget.configure(parseInput({url:expected.url}));
-    const result=await acquire(parseInput({url:expected.url}),{budget,proxyMode,proxy,
+    const input=parseInput({url:expected.url,...(disableHttp2 === undefined ? {} : {disableHttp2})});
+    const budget=clock();budget.configure(input);
+    const result=await acquire(input,{budget,proxyMode,proxy,
         browserType:{launch:async options=>{launchOptions=options;return browser;}}});
     budget.stop();return{result,calls,contextOptions,launchOptions};
 }
+test('HTTP/2 experiment changes only the requested launch argument across connection modes',async()=>{
+    assert.equal(parseInput({url:expected.url}).disableHttp2,false);
+    for(const value of ['true','false',1,null])
+        assert.throws(()=>parseInput({url:expected.url,disableHttp2:value}),error=>error.code==='INVALID_INPUT');
+    for(const proxyMode of ['direct','residential','unblocker']){
+        const proxy=proxyMode==='direct'?null:{server:'http://proxy.invalid:8000',username:'synthetic-user',password:'PRIVATE'};
+        const control=await browserFixture(200,{proxyMode,proxy});
+        const experiment=await browserFixture(200,{proxyMode,proxy,disableHttp2:true});
+        const {args,...otherOptions}=experiment.launchOptions;
+        assert.deepEqual(args,['--disable-http2']);assert.deepEqual(otherOptions,control.launchOptions);
+        assert.equal(control.result.acquisition.http2Disabled,false);assert.equal(experiment.result.acquisition.http2Disabled,true);
+        assert.deepEqual(experiment.contextOptions,control.contextOptions);
+        assert.equal(experiment.calls,1);assert.equal(control.calls,1);
+        assert.equal(experiment.result.acquisition.status,'received');assert.equal(experiment.result.html,control.result.html);
+    }
+    const explicitFalse=await browserFixture(200,{disableHttp2:false});
+    assert.equal(Object.hasOwn(explicitFalse.launchOptions,'args'),false);
+    assert.equal(explicitFalse.result.acquisition.http2Disabled,false);
+});
 test('Unblocker retry exhaustion with no HTTP retains unknown cause and safe transport evidence',async()=>{
     const proxy={server:'http://proxy.invalid:8000',username:'groups-UNBLOCKER',password:'PRIVATE'};
     const {result,calls,launchOptions,contextOptions}=await browserFixture(null,

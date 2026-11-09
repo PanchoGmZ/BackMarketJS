@@ -15,7 +15,8 @@ export async function acquire(input, { proxy = null, proxyMode = 'direct', budge
     const started = performance.now(), remaining = () => Math.min(budget.remaining(budget.acquisition), budget.remaining());
     const tlsVerified = proxyMode !== 'unblocker';
     const report = { status: 'running', navigationCount: 0, directApiRequests: 0, requests: [], redirects: [],
-        resourceErrors: [], navigationFailures: [], browserClosed: false, stage: 'browser-start', tlsVerified };
+        resourceErrors: [], navigationFailures: [], browserClosed: false, stage: 'browser-start', tlsVerified,
+        http2Disabled: input.disableHttp2 === true };
     report.proxyTransport = { mode: proxyMode, configured: Boolean(proxy),
         usernameProvided: Boolean(proxy?.username), passwordProvided: Boolean(proxy?.password),
         credentialBinding: proxy ? 'playwright-launch-fields' : 'none' };
@@ -73,13 +74,14 @@ export async function acquire(input, { proxy = null, proxyMode = 'direct', budge
     let monitor;
     try {
         const launch = browserType.launch({ headless: process.env.APIFY_IS_AT_HOME === '1' || process.platform !== 'win32',
+            ...(report.http2Disabled ? { args: ['--disable-http2'] } : {}),
             ...(process.platform === 'win32' && process.env.APIFY_IS_AT_HOME !== '1' ? { channel: 'chrome' } : {}),
             timeout: Math.max(1, remaining() - 2000), ...(proxy ? { proxy } : {}) });
         launch.then(b => { if (closing) b.close().catch(() => {}); }, () => {});
         browser = await bounded(launch, remaining() - 2000, signal, 'browser-start');
         report.browserStartupSeconds = (performance.now() - started) / 1000;
         context = await bounded(browser.newContext({ ignoreHTTPSErrors: !tlsVerified }), remaining() - 2000, signal, 'context-start');
-        event('PROXY_TRANSPORTE', report.proxyTransport);
+        event('PROXY_TRANSPORTE', { ...report.proxyTransport, http2Disabled: report.http2Disabled });
         event('TLS', { verified: tlsVerified });
         page = await context.newPage();
         // Bind events and routes before the only Page.goto().

@@ -37,6 +37,12 @@
       "maximum": 180,
       "default": 180
     },
+    "disableHttp2": {
+      "title": "Experimental: desactivar HTTP/2 en Chromium",
+      "type": "boolean",
+      "description": "Anade --disable-http2 solo al habilitarlo. Prueba comparativa de transporte; no demuestra que HTTP/2 cause el fallo ni controla la conexion de Unblocker al destino.",
+      "default": false
+    },
     "proxyConfiguration": {
       "sectionCaption": "Red opcional - acceso autorizado",
       "title": "Apify Proxy",

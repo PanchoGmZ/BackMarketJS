@@ -3,6 +3,7 @@
   "outputFormat": "reference1688",
   "diagnosticMode": false,
   "diagnosticTimeoutSeconds": 180,
+  "disableHttp2": false,
   "proxyConfiguration": {
     "useApifyProxy": true,
     "apifyProxyGroups": [
