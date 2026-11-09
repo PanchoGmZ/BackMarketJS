@@ -6,14 +6,20 @@ Version independiente del Actor Python de TU CUMPA. Node.js 22+ (Docker Node 24)
 
 - Comparacion offline exacta de los once campos con las capturas comerciales autenticas y las salidas Python guardadas del iPhone 15 Plus (413 USD) e iPhone 14 Pro (379 USD).
 - El JSON Python del iPhone 14 Plus (299 USD, 6 imagenes, 27 caracteristicas, 4 grupos y 15 opciones) fue facilitado por el usuario. Se valida su contrato y peso de 7 oz. Falta su HTML/Nuxt o respuestas originales para repetir su transformacion desde los mismos datos.
-- No se ha ejecutado navegacion real de esta version JavaScript ni un run de Apify Cloud. Las pruebas de transporte utilizan dobles de Playwright, sin sockets.
+- El usuario ha confirmado extracciones reales de telefonos en Apify Cloud. La ampliacion de URLs cortas se valida offline; las pruebas de transporte utilizan dobles de Playwright, sin sockets.
 - Dockerfile preparado; Docker Desktop esta instalado pero el motor Linux no esta disponible. La imagen no se ha construido.
 
 El Actor Python original y su repositorio permanecen intactos. Esta carpeta debe publicarse, si se desea, en OTRO repositorio y en OTRO Actor.
 
 ## Entrada
 
-Introduce una ficha HTTPS completa de www.backmarket.com/en-us/p/slug/UUID. Se aceptan los parametros l y offerType; se conserva la seleccion. Se rechazan otros dominios, credenciales, fragmentos, parametros desconocidos y enlaces sin UUID.
+Introduce una ficha HTTPS de `www.backmarket.com/en-us/p/slug/UUID` o una URL corta `www.backmarket.com/en-us/p/slug`. Se aceptan los parametros comerciales comprobados `l` y `offerType`; se conserva la URL y su seleccion. Otros parametros se rechazan expresamente hasta contar con evidencia de su uso, sin descartarlos silenciosamente. Se rechazan otros dominios, credenciales, fragmentos, categorias y busquedas.
+
+Las fichas con UUID conservan la verificacion existente. Para una URL corta, el UUID debe proceder de la URL final de la misma navegacion, de un canonical con el mismo slug de la pagina solicitada/final, o de un Product JSON-LD asociado a esa pagina. Las evidencias contradictorias se rechazan. No se sigue el canonical con otra solicitud. El parser Nuxt actual verifica despues el producto y el precio seleccionado; en esta via tambien se exige que la oferta o alguna opcion seleccionada declare el mismo UUID. Solo entonces se vincula la identidad al input interno para pasar la comprobacion existente del Actor. `PRODUCT_METADATA.productIdentity` conserva el origen. No se elige el primer UUID de una cache ni un producto recomendado.
+
+Sin identidad u oferta verificables se devuelve `SHORT_URL_IDENTITY_UNVERIFIED`, `SHORT_URL_IDENTITY_AMBIGUOUS` o `SHORT_URL_SELECTED_OFFER_UNVERIFIED`, sin guardar un producto falso. Las URLs cortas se resuelven con el HTML ya recibido; no se atribuyen respuestas JSON de UUID desconocidos ni se hacen peticiones para descubrir variantes. Una pagina de familia sin seleccion comercial explicita puede no ser extraible por esta via.
+
+**Pendiente de Cloud:** iPad Air 2022, MacBook Pro M3, Apple Watch Series 11 y Xbox Series S. Sus cuatro URLs se admiten estructuralmente; no hay HTML comercial local de estas categorias y no se afirma extraccion completa. Las pruebas de alias usan capturas autenticas de telefonos con anclas/serializacion de prueba claramente sinteticas; no son capturas de nuevas categorias. Los grupos de variantes se siguen leyendo dinamicamente. Peso y dimensiones conservan su normalizacion y ausencia existentes; no se agregan valores ni reglas de categoria sin evidencia.
 
     {
       "url": "PEGA_AQUI_UNA_URL_COMPATIBLE",
@@ -25,7 +31,7 @@ Introduce una ficha HTTPS completa de www.backmarket.com/en-us/p/slug/UUID. Se a
       "proxyAccessAuthorized": false
     }
 
-Los identificadores de prueba solo aparecen en fixtures. El extractor obtiene el UUID dinamicamente de la URL.
+Los identificadores de prueba solo aparecen en fixtures y pruebas. El extractor obtiene el UUID dinamicamente de la URL o de las evidencias comerciales verificadas de una ficha corta.
 
 ## Ejecucion local con F5
 

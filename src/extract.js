@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { load } from 'cheerio';
 import { decode, findCommerce } from './nuxt.js';
 import { productWeight } from './weight.js';
+import { resolveShortIdentity, verifyShortOffer } from './product_identity.js';
 import { array, object, record, text, decimal, decimalEqual, imageUrl, UUID_RE, UUID_SOURCE } from './values.js';
 
 const parameters = new Set(['grade', 'battery', 'premium_grade', 'battery_confidence_experiment',
@@ -114,6 +115,15 @@ export function transform(input, raw, fallback = {}) {
 }
 export function extractHtml(html, input, responses = {}) {
     if (typeof html !== 'string' || Buffer.byteLength(html) > input.maxHtmlBytes) throw new Error('HTML_TOO_LARGE_OR_INVALID');
+    if (input.productId === null) {
+        const identity = resolveShortIdentity(html, input);
+        const result = extractHtml(html, { ...input, productId: identity.productId }, responses);
+        verifyShortOffer(result, identity);
+        result.metadata.productIdentity = { urlForm: 'short', ...identity };
+        // Bind the resolved identity only after validation, for the unchanged Actor guard.
+        input.productId = identity.productId;
+        return result;
+    }
     const $ = load(html), data = {}, fallback = {}, inventory = [], sources = {};
     let originalPricePresent = false, jsonLdProductFound = false;
     function remember(kind, value, source, replace = false) {

@@ -10,7 +10,7 @@
     "url": {
       "title": "URL del producto",
       "type": "string",
-      "description": "HTTPS www.backmarket.com/en-us/p/slug/UUID. Parametros l y offerType admitidos.",
+      "description": "HTTPS www.backmarket.com/en-us/p/slug con o sin /UUID. Parametros l y offerType conservados. Las URLs cortas requieren identidad y oferta seleccionada verificables en el documento; familias sin oferta se rechazan.",
       "editor": "textfield",
       "prefill": ""
     },

@@ -37,6 +37,19 @@ test('valid live acquisition pushes exactly one aggregate via default Dataset', 
     assert.deepEqual(actor.records,[expected]); assert.equal(actor.values.RUN_STATE.savedResults,1);
     assert.equal(actor.values.PRODUCT_METADATA.currency,'USD');
 });
+test('short alias resolves before the unchanged Actor identity guard and saves one aggregate',async()=>{
+    const url=expected.url.replace('/'+id,''),actor=new FakeActor({url,proxyConfiguration:{useApifyProxy:false}});
+    const result=await runActor({actor,budget:clock(),acquireFn:async()=>({html,responses:{},
+        acquisition:{status:'received',requests:[],navigationCount:1,finalUrl:expected.url}})});
+    assert.equal(result.exitCode,0);assert.equal(result.state.status,'success');
+    assert.deepEqual(actor.records,[{...expected,url}]);assert.equal(result.state.productDocument.uuidMatches,true);
+});
+test('unresolved short URL is a structured error with no Dataset product',async()=>{
+    const url=expected.url.replace('/'+id,''),actor=new FakeActor({url,proxyConfiguration:{useApifyProxy:false}});
+    const result=await runActor({actor,budget:clock(),acquireFn:async()=>success()});
+    assert.equal(result.exitCode,1);assert.equal(result.state.status,'error');
+    assert.equal(result.state.error.code,'SHORT_URL_IDENTITY_UNVERIFIED');assert.equal(actor.records.length,0);
+});
 test('valid product with incomplete optional variants stays partial but exits successfully after save',async()=>{
     const actor=new FakeActor({url:partialExpected.url,proxyConfiguration:{useApifyProxy:false}});
     const result=await runActor({actor,budget:clock(),acquireFn:async()=>({html:partialHtml,responses:{},acquisition:{status:'received',requests:[],navigationCount:1}})});
@@ -157,7 +170,7 @@ test('normal and diagnostic budgets share process age',()=>{
     b.configure(parseInput({url:expected.url,diagnosticMode:true}));assert.equal(b.remaining(b.acquisition),140000);
     age=180001;assert.equal(b.remaining(b.total),0);b.stop();
 });
-async function browserFixture(status,{optional=false,proxyMode='direct',proxy=null,failureCode=null,documentHtml=html,bodyFailure=false,disableHttp2}={}) {
+async function browserFixture(status,{optional=false,proxyMode='direct',proxy=null,failureCode=null,documentHtml=html,bodyFailure=false,disableHttp2,productUrl=expected.url}={}) {
     const page=new EventEmitter();let calls=0,contextOptions,launchOptions;
     page.route=async()=>{};page.mainFrame=()=>page;page.url=()=>expected.url;page.content=async()=>documentHtml;
     const request=()=>({isNavigationRequest:()=>true,frame:()=>page});
@@ -178,12 +191,17 @@ async function browserFixture(status,{optional=false,proxyMode='direct',proxy=nu
         return {};
     };
     const browser={newContext:async options=>{contextOptions=options;return{newPage:async()=>page};},close:async()=>{}};
-    const input=parseInput({url:expected.url,...(disableHttp2 === undefined ? {} : {disableHttp2})});
+    const input=parseInput({url:productUrl,...(disableHttp2 === undefined ? {} : {disableHttp2})});
     const budget=clock();budget.configure(input);
     const result=await acquire(input,{budget,proxyMode,proxy,
         browserType:{launch:async options=>{launchOptions=options;return browser;}}});
     budget.stop();return{result,calls,contextOptions,launchOptions};
 }
+test('short URL receives the current document without inventing endpoint IDs or another navigation',async()=>{
+    const {result,calls}=await browserFixture(200,{productUrl:expected.url.replace('/'+id,'')});
+    assert.equal(calls,1);assert.equal(result.acquisition.status,'received');
+    assert.equal(result.acquisition.htmlSource,'navigation-response');assert.deepEqual(result.responses,{});
+});
 test('HTTP/2 experiment changes only the requested launch argument across connection modes',async()=>{
     assert.equal(parseInput({url:expected.url}).disableHttp2,false);
     for(const value of ['true','false',1,null])

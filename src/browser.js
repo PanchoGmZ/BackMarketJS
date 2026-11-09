@@ -23,7 +23,8 @@ export async function acquire(input, { proxy = null, proxyMode = 'direct', budge
     let browser, context, page, html = '', accepted = false, closing = false;
     const responses = {}, tasks = new Set(), ready = deferred(), stopped = deferred(), deniedOptional = new Set();
     const origin = new URL(input.url).origin, base = '/product-page/products/' + input.productId;
-    const paths = new Map([[base, 'product'], [base + '/pickers', 'pickers'], [base + '/technical_specifications', 'specifications']]);
+    const paths = input.productId === null ? new Map()
+        : new Map([[base, 'product'], [base + '/pickers', 'pickers'], [base + '/technical_specifications', 'specifications']]);
     function fail(status, code, stage = report.stage) {
         if (report.error) return;
         report.status = status; report.failureStage = stage; report.error = { code, stage };
@@ -61,7 +62,8 @@ export async function acquire(input, { proxy = null, proxyMode = 'direct', budge
             } else {
                 const document = raw.toString('utf8');
                 if (visibleChallenge(document)) { fail('blocked', 'ACCESS_CHALLENGE', 'html-validation'); return; }
-                if (document.toLowerCase().includes(input.productId) && ['selectedOffer', 'pickerGroups', 'specifications'].every(k => document.includes(k)))
+                if ((input.productId === null || document.toLowerCase().includes(input.productId))
+                    && ['selectedOffer', 'pickerGroups', 'specifications'].every(k => document.includes(k)))
                     // This exact response body has already passed the challenge check above.
                     offerHtml(document, 'navigation-response', response.url(), true);
             }
