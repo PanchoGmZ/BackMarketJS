@@ -1,6 +1,6 @@
 
 import { randomUUID } from 'node:crypto';
-import { ExtractionError, record } from './values.js';
+import { ExtractionError, record } from '../shared/values.js';
 export function proxySettings(input, { requireAuthorization = true } = {}) {
     const config = input.proxyConfiguration ?? { useApifyProxy: true, apifyProxyGroups: ['UNBLOCKER'] };
     const authorized = input.proxyAccessAuthorized ?? false;

@@ -1,5 +1,5 @@
 
-import { UUID_RE, UUID_SOURCE, record } from './values.js';
+import { UUID_RE, UUID_SOURCE, record } from '../shared/values.js';
 
 // Data-only port of the Python decoder: no eval, JS execution or custom revivers.
 export function decode(payload) {

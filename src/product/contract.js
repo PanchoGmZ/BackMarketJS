@@ -1,5 +1,5 @@
 
-import { decimal, record, imageUrl } from './values.js';
+import { decimal, record, imageUrl } from '../shared/values.js';
 export const fields = ['url','title','price','productLadderPrices','moq','weight','dimensions','images','characteristics','variations','productId'];
 export function assertProduct(p) {
     const nullableText = v => v === null || typeof v === 'string';

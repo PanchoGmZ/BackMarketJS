@@ -6,9 +6,9 @@ export function navigationFailure(error, stage = 'navigation', source = 'excepti
     let message = typeof error === 'string' ? error : error instanceof Error ? error.message : '';
     message = message.replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s'"<>]+/gi, '[URL]')
         .replace(/\b(password|passwd|username|token|authorization|cookie)\s*[:=]\s*("[^"]*"|'[^']*'|[^\s,;]+)/gi, '[PRIVATE]');
-    const chromiumSignals = message.match(/(?<![A-Z0-9_])(?:net::)?ERR_[A-Z0-9_]{1,70}\b/g) ?? [];
     const firefoxSignals = message.match(/\b(?:NS_ERROR_[A-Z0-9_]+|SEC_ERROR_[A-Z0-9_]+|SSL_ERROR_[A-Z0-9_]+|PR_CONNECT_[A-Z0-9_]+)\b/g) ?? [];
-    const signals = [...new Set([...chromiumSignals, ...firefoxSignals])].map(s => s.replace('net::', ''));
+    const browserSignals = message.match(/(?<![A-Z0-9_])(?:net::)?ERR_[A-Z0-9_]{1,70}\b/g) ?? [];
+    const signals = [...new Set([...browserSignals, ...firefoxSignals])].map(s => s.replace('net::', ''));
     const has = pattern => signals.some(s => pattern.test(s));
     const code = error instanceof ExtractionError ? error.code
         : has(/^ERR_(CERT_|SSL_|PROXY_CERTIFICATE)/) ? 'TLS_ERROR'
@@ -23,17 +23,15 @@ export function navigationFailure(error, stage = 'navigation', source = 'excepti
         : has(/^(?:NS_ERROR_NET_RESET|NS_ERROR_NET_INTERRUPT|PR_CONNECT_RESET_ERROR)$/) ? 'NETWORK_ERROR'
         : signals.includes('ERR_TUNNEL_CONNECTION_FAILED') ? 'PROXY_TUNNEL_ERROR'
         : signals.includes('ERR_PROXY_CONNECTION_FAILED') ? 'PROXY_CONNECTION_ERROR'
-        : signals.length ? (firefoxSignals.includes(signals.at(-1)) ? 'FIREFOX_' : 'CHROMIUM_') + signals.at(-1)
+        : signals.length ? (firefoxSignals.includes(signals.at(-1)) ? 'FIREFOX_' : 'BROWSER_') + signals.at(-1)
         : error?.name === 'TimeoutError' ? 'TIMEOUT' : 'NAVIGATION_ERROR';
     const category = code === 'TLS_ERROR' ? 'tls' : code === 'PROXY_AUTH_ERROR' ? 'proxy-authentication'
         : code === 'AUTHENTICATION_ERROR' ? 'authentication' : code === 'PROXY_TUNNEL_ERROR' ? 'proxy-tunnel'
         : code === 'PROXY_CONNECTION_ERROR' ? 'proxy-connection'
         : code === 'DNS_ERROR' ? 'dns' : code === 'TCP_ERROR' ? 'tcp'
         : code === 'NETWORK_ERROR' ? 'network'
-        : code === 'CHROMIUM_ERR_TOO_MANY_RETRIES' ? 'retry-exhaustion'
         : code === 'TIMEOUT' ? 'timeout' : 'navigation';
     return { code: /^[A-Z][A-Z0-9_]{1,90}$/.test(code) ? code : 'NAVIGATION_ERROR', stage, source, category,
-        ...(category === 'retry-exhaustion' ? { underlyingCause: 'undetermined' } : {}),
         signals, rawMessageOmitted: true, failureType: 'navigation' };
 }
 export function classifyHttp(category, status, explicitChallenge = false) {

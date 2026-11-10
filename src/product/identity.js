@@ -1,6 +1,6 @@
 import { load } from 'cheerio';
-import { productUrlIdentity } from './input.js';
-import { UUID_RE, ExtractionError, record } from './values.js';
+import { productUrlIdentity } from '../platform/input.js';
+import { UUID_RE, ExtractionError, record } from '../shared/values.js';
 
 // Only for short URLs. Page identity must be explicit; unique recommendations
 // or an arbitrary UUID found in a Nuxt cache are not evidence of page identity.

@@ -2,7 +2,7 @@
   "actorSpecification": 1,
   "name": "backmarket-url-extractor-js",
   "title": "Back Market URL Extractor (JavaScript)",
-  "description": "Independent Node.js migration of the verified Nuxt product extractor. One URL and one aggregate reference1688 record.",
+  "description": "Firefox-based Back Market product extractor that validates the selected offer and saves one eleven-field JSON 1688 record.",
   "version": "0.1",
   "meta": {
     "generatedBy": "Codex with GPT-6.1 Sol"

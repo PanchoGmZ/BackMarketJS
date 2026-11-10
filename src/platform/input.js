@@ -1,5 +1,5 @@
 
-import { UUID_SOURCE, ExtractionError, record } from './values.js';
+import { UUID_SOURCE, ExtractionError, record } from '../shared/values.js';
 const keys = new Set(['l', 'offerType']);
 const selectionValue = /^[A-Za-z0-9_.-]{1,100}$/;
 const productPath = new RegExp('^/en-us/p/([^/]+)(?:/(' + UUID_SOURCE + '))?/?$', 'i');
@@ -47,14 +47,13 @@ export function safeUrl(value) {
 }
 export function parseInput(raw, env = process.env) {
     if (!record(raw)) throw new ExtractionError('INVALID_INPUT', 'input');
-    const allowed = new Set(['url', 'transport', 'firefoxFastMode', 'outputFormat', 'diagnosticMode', 'diagnosticTimeoutSeconds', 'disableHttp2', 'proxyConfiguration', 'proxyAccessAuthorized']);
+    const allowed = new Set(['url', 'firefoxFastMode', 'outputFormat', 'diagnosticMode', 'diagnosticTimeoutSeconds', 'proxyConfiguration', 'proxyAccessAuthorized']);
     if (Object.keys(raw).some(k => !allowed.has(k))) throw new ExtractionError('UNKNOWN_INPUT_FIELD', 'input');
-    const value = { transport: 'firefox', firefoxFastMode: false, outputFormat: 'reference1688', diagnosticMode: false, diagnosticTimeoutSeconds: 180, disableHttp2: false,
+    const value = { firefoxFastMode: false, outputFormat: 'reference1688', diagnosticMode: false, diagnosticTimeoutSeconds: 180,
         proxyConfiguration: { useApifyProxy: true, apifyProxyGroups: ['UNBLOCKER'] },
         proxyAccessAuthorized: false, ...raw };
-    if (typeof value.url !== 'string' || !['chromium', 'firefox', 'undici'].includes(value.transport)
-        || typeof value.firefoxFastMode !== 'boolean' || (value.firefoxFastMode && value.transport !== 'firefox') || value.outputFormat !== 'reference1688'
-        || typeof value.diagnosticMode !== 'boolean' || typeof value.disableHttp2 !== 'boolean' || !Number.isInteger(value.diagnosticTimeoutSeconds)
+    if (typeof value.url !== 'string' || typeof value.firefoxFastMode !== 'boolean' || value.outputFormat !== 'reference1688'
+        || typeof value.diagnosticMode !== 'boolean' || !Number.isInteger(value.diagnosticTimeoutSeconds)
         || value.diagnosticTimeoutSeconds < 30 || value.diagnosticTimeoutSeconds > 180) throw new ExtractionError('INVALID_INPUT', 'input');
     const identity = productUrlIdentity(value.url);
     const maxHtmlBytes = Number(env.BACKMARKET_MAX_HTML_BYTES ?? 4194304);

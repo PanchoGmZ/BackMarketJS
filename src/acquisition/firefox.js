@@ -1,8 +1,8 @@
 import { anonymizeProxy, closeAnonymizedProxy } from 'proxy-chain';
 import { firefox } from 'playwright';
-import { acquireOnce } from './browser.js';
-import { event } from './diagnostics.js';
-import { ExtractionError } from './values.js';
+import { acquireOnce } from './firefox_page.js';
+import { event } from '../shared/diagnostics.js';
+import { ExtractionError } from '../shared/values.js';
 
 function makeAuthenticatedProxyUrl(proxy) {
     if (!proxy || typeof proxy.server !== 'string' || typeof proxy.username !== 'string' || !proxy.username
@@ -81,7 +81,6 @@ export async function acquire(input, options = {}) {
             proxy: browserProxy,
             proxyMode,
             browserType,
-            transport: 'firefox',
             proxyBridge,
         });
         result.acquisition.proxyBridge = proxyBridge

@@ -1,14 +1,12 @@
 {
   "url": "",
+  "firefoxFastMode": false,
   "outputFormat": "reference1688",
   "diagnosticMode": false,
   "diagnosticTimeoutSeconds": 180,
-  "disableHttp2": false,
   "proxyConfiguration": {
     "useApifyProxy": true,
-    "apifyProxyGroups": [
-      "UNBLOCKER"
-    ]
+    "apifyProxyGroups": ["UNBLOCKER"]
   },
   "proxyAccessAuthorized": false
 }

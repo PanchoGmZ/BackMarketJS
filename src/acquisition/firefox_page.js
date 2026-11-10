@@ -1,9 +1,9 @@
 
-import { chromium } from 'playwright';
+import { firefox } from 'playwright';
 import { load } from 'cheerio';
-import { bounded, memoryObservation } from './budget.js';
-import { classifyHttp, event, navigationFailure } from './diagnostics.js';
-import { challengeUrl, safeUrl, selectionState } from './input.js';
+import { bounded, memoryObservation } from '../shared/budget.js';
+import { classifyHttp, event, navigationFailure } from '../shared/diagnostics.js';
+import { challengeUrl, safeUrl, selectionState } from '../platform/input.js';
 
 function deferred() { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; }
 function visibleChallenge(html) {
@@ -39,26 +39,20 @@ function proxyBridgeNavigationFailure(diagnosis) {
         return { code: 'PROXY_BRIDGE_CONNECTION_ERROR', category: 'bridge-connection-undetermined' };
     return null;
 }
-const RECOVERY_DELAY_MS = 2500;
-// Keep enough time for a cold browser start, navigation, and bounded close.
-const MIN_SECOND_ATTEMPT_WINDOW_MS = 10000;
-const CLEANUP_RESERVE_MS = 2000;
-
-async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budget, signal, browserType = chromium,
-    attemptNumber = 1, transport = 'chromium', proxyBridge = false } = {}) {
+async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budget, signal, browserType = firefox,
+    attemptNumber = 1, proxyBridge = false } = {}) {
     const started = performance.now(), remaining = () => Math.min(budget.remaining(budget.acquisition), budget.remaining());
     const tlsVerified = proxyMode !== 'unblocker';
-    const fastMode = transport === 'firefox' && input.firefoxFastMode === true;
+    const fastMode = input.firefoxFastMode === true;
     const report = { status: 'running', navigationCount: 0, directApiRequests: 0, requests: [], redirects: [],
         resourceErrors: [], navigationFailures: [], browserClosed: false, stage: 'browser-start', tlsVerified,
-        http2Disabled: transport === 'chromium' && input.disableHttp2 === true, attemptNumber,
-        ...(transport === 'chromium' ? {} : { transport }),
-        ...(transport === 'firefox' ? { fastMode, fastModeBlockedResources: { image: 0, font: 0, media: 0 }, timings: {
+        attemptNumber, transport: 'firefox',
+        fastMode, fastModeBlockedResources: { image: 0, font: 0, media: 0 }, timings: {
             browserLaunchSeconds: null, contextSetupSeconds: null, pageSetupSeconds: null, routeSetupSeconds: null,
             navigationWaitUntil: fastMode ? 'commit' : 'domcontentloaded', navigationStartedSeconds: null,
             documentHeadersSeconds: null, documentBodyReadSeconds: null, navigationWaitSeconds: null,
             domContentLoadedSeconds: null, pageContentSeconds: null, htmlPreparationSeconds: 0, browserCloseSeconds: null,
-        } } : {}) };
+        } };
     report.proxyTransport = { mode: proxyMode, configured: Boolean(proxy),
         usernameProvided: proxyBridge ? false : Boolean(proxy?.username),
         passwordProvided: proxyBridge ? false : Boolean(proxy?.password),
@@ -130,8 +124,6 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
     let monitor;
     try {
         const launch = browserType.launch({ headless: process.env.APIFY_IS_AT_HOME === '1' || process.platform !== 'win32',
-            ...(transport === 'chromium' && report.http2Disabled ? { args: ['--disable-http2'] } : {}),
-            ...(transport === 'chromium' && process.platform === 'win32' && process.env.APIFY_IS_AT_HOME !== '1' ? { channel: 'chrome' } : {}),
             timeout: Math.max(1, remaining() - 2000), ...(proxy ? { proxy } : {}) });
         launch.then(b => { if (closing) b.close().catch(() => {}); }, () => {});
         browser = await bounded(launch, remaining() - 2000, signal, 'browser-start');
@@ -140,9 +132,8 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
         const contextStarted = performance.now();
         context = await bounded(browser.newContext({ ignoreHTTPSErrors: !tlsVerified }), remaining() - 2000, signal, 'context-start');
         if (report.timings) report.timings.contextSetupSeconds = (performance.now() - contextStarted) / 1000;
-        event('PROXY_TRANSPORTE', { ...(transport === 'chromium' ? {} : { transport }), ...report.proxyTransport,
-            http2Disabled: report.http2Disabled });
-        event('TLS', { ...(transport === 'chromium' ? {} : { transport }), verified: tlsVerified });
+        event('PROXY_TRANSPORTE', { transport: 'firefox', ...report.proxyTransport });
+        event('TLS', { transport: 'firefox', verified: tlsVerified });
         const pageStarted = performance.now();
         page = await context.newPage();
         if (report.timings) report.timings.pageSetupSeconds = (performance.now() - pageStarted) / 1000;
@@ -240,7 +231,7 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
         }).catch(() => {}); }, 1000);
         report.stage = 'navigation'; report.navigationCount = 1;
         const waitUntil = fastMode ? 'commit' : 'domcontentloaded';
-        event('NAVEGACION', { ...(transport === 'chromium' ? {} : { transport }), count: 1, max: 1, waitUntil, retries: 0 });
+        event('NAVEGACION', { transport: 'firefox', count: 1, max: 1, waitUntil, retries: 0 });
         navigationStarted = performance.now();
         if (report.timings) report.timings.navigationStartedSeconds = (navigationStarted - started) / 1000;
         const navigation = page.goto(input.url, { waitUntil, timeout: Math.max(1, remaining() - 2000) })
@@ -304,30 +295,10 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
     return { html, responses, acquisition: report };
 }
 
-function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
-async function waitForRecovery(ms, signal, sleepImpl) {
-    if (signal?.aborted) return false;
-    let onAbort;
-    const aborted = new Promise(resolve => {
-        onAbort = () => resolve(false);
-        signal?.addEventListener('abort', onAbort, { once: true });
-    });
-    try {
-        return await Promise.race([Promise.resolve().then(() => sleepImpl(ms)).then(() => true), aborted]);
-    } finally { signal?.removeEventListener('abort', onAbort); }
-}
 function timeRemaining(budget) {
     return Math.max(0, Math.min(budget.remaining(budget.acquisition), budget.remaining()));
 }
 function seconds(ms) { return Math.round(ms) / 1000; }
-function retryEligible(result) {
-    const report = result?.acquisition;
-    return report?.error?.code === 'CHROMIUM_ERR_TOO_MANY_RETRIES'
-        && report.failureStage === 'navigation'
-        && report.navigationError?.source === 'page.goto'
-        && report.navigationError.documentResponsesObserved === 0
-        && !report.requests.some(request => request.category === 'document');
-}
 function attemptSummary(result, number, remainingMs) {
     const report = result.acquisition;
     return { number, seconds: report.seconds, remainingSeconds: seconds(remainingMs), status: report.status,
@@ -336,96 +307,16 @@ function attemptSummary(result, number, remainingMs) {
         documentResponsesObserved: report.navigationError?.documentResponsesObserved ?? null,
         httpStatus: report.navigationError?.httpStatus ?? report.requests.filter(r => r.category === 'document').at(-1)?.httpStatus ?? null };
 }
-function finalizeAttempts(result, attempts, started, recovery) {
-    const report = result.acquisition;
-    report.attempts = attempts;
-    report.attemptCount = attempts.length;
-    report.navigationCount = attempts.reduce((count, attempt) => count + attempt.navigationCount, 0);
-    report.seconds = (performance.now() - started) / 1000;
-    report.recovery = recovery;
-    // Retain observations from both navigations while keeping the HTML and
-    // commercial response objects strictly from the final attempt.
-    for (const key of ['requests', 'redirects', 'resourceErrors', 'navigationFailures']) {
-        const earlier = attempts.length > 1 ? result._earlierAcquisition?.[key] ?? [] : [];
-        report[key] = [...earlier, ...(report[key] ?? [])];
-    }
-    delete result._earlierAcquisition;
-    event('ADQUISICION', { status: report.status, seconds: report.seconds, navigationCount: report.navigationCount,
-        attempts: report.attemptCount, browserClosed: report.browserClosed, recoveryAttempted: recovery.attempted });
-    return result;
-}
-
-export async function acquire(input, options = {}) {
-    const started = performance.now();
-    const { budget, signal, sleepImpl = delay } = options;
-    event('INTENTO', { number: '1/2', phase: 'starting', remainingSeconds: seconds(timeRemaining(budget)) });
-    const first = await acquireAttempt(input, { ...options, attemptNumber: 1 });
-    const attempts = [attemptSummary(first, 1, timeRemaining(budget))];
-    event('INTENTO_RESULTADO', { ...attempts[0], totalNavigationCount: attempts[0].navigationCount });
-    let recovery = { attempted: false, skippedReason: null, initialFailure: null };
-    if (!retryEligible(first)) {
-        recovery.skippedReason = 'not-eligible';
-        return finalizeAttempts(first, attempts, started, recovery);
-    }
-
-    recovery.initialFailure = first.acquisition.navigationError;
-    if (!first.acquisition.browserClosed) {
-        recovery.skippedReason = 'browser-close-failed';
-        event('RECUPERACION_OMITIDA', { reason: recovery.skippedReason, code: first.acquisition.closeError ?? 'BROWSER_NOT_CLOSED' }, 'warning');
-        return finalizeAttempts(first, attempts, started, recovery);
-    }
-
-    const beforeWaitMs = timeRemaining(budget);
-    if (beforeWaitMs < RECOVERY_DELAY_MS + MIN_SECOND_ATTEMPT_WINDOW_MS + CLEANUP_RESERVE_MS) {
-        recovery.skippedReason = 'insufficient-time';
-        event('RECUPERACION_OMITIDA', { reason: recovery.skippedReason, remainingSeconds: seconds(beforeWaitMs),
-            requiredSeconds: seconds(RECOVERY_DELAY_MS + MIN_SECOND_ATTEMPT_WINDOW_MS + CLEANUP_RESERVE_MS) }, 'warning');
-        return finalizeAttempts(first, attempts, started, recovery);
-    }
-
-    event('RECUPERACION', { motivo: 'CHROMIUM_ERR_TOO_MANY_RETRIES', remainingSeconds: seconds(beforeWaitMs),
-        delaySeconds: seconds(RECOVERY_DELAY_MS), maxNavigations: 2 });
-    event('ESPERA_RECUPERACION', { seconds: seconds(RECOVERY_DELAY_MS) });
-    const waited = await waitForRecovery(RECOVERY_DELAY_MS, signal, sleepImpl);
-    if (!waited) {
-        recovery.skippedReason = signal?.aborted ? 'aborted' : 'wait-interrupted';
-        event('RECUPERACION_OMITIDA', { reason: recovery.skippedReason, remainingSeconds: seconds(timeRemaining(budget)) }, 'warning');
-        return finalizeAttempts(first, attempts, started, recovery);
-    }
-    const afterWaitMs = timeRemaining(budget);
-    if (afterWaitMs < MIN_SECOND_ATTEMPT_WINDOW_MS + CLEANUP_RESERVE_MS) {
-        recovery.skippedReason = 'insufficient-time-after-wait';
-        event('RECUPERACION_OMITIDA', { reason: recovery.skippedReason, remainingSeconds: seconds(afterWaitMs) }, 'warning');
-        return finalizeAttempts(first, attempts, started, recovery);
-    }
-    if (signal?.aborted) {
-        recovery.skippedReason = 'aborted';
-        return finalizeAttempts(first, attempts, started, recovery);
-    }
-
-    recovery.attempted = true;
-    event('INTENTO', { number: '2/2', phase: 'starting', remainingSeconds: seconds(afterWaitMs),
-        navigationCount: attempts.reduce((count, attempt) => count + attempt.navigationCount, 0) });
-    const second = await acquireAttempt(input, { ...options, attemptNumber: 2 });
-    attempts.push(attemptSummary(second, 2, timeRemaining(budget)));
-    event('INTENTO_RESULTADO', { ...attempts[1], totalNavigationCount: attempts.reduce((count, attempt) => count + attempt.navigationCount, 0) });
-    recovery.acquisitionReceived = second.acquisition.status === 'received';
-    recovery.finalCode = second.acquisition.error?.code ?? null;
-    second._earlierAcquisition = first.acquisition;
-    return finalizeAttempts(second, attempts, started, recovery);
-}
-
-// Single browser acquisition shared by the non-retrying Firefox transport.
 export async function acquireOnce(input, options = {}) {
-    const { budget, transport = 'chromium' } = options;
-    event('INTENTO', { number: '1/1', transport, phase: 'starting', remainingSeconds: seconds(timeRemaining(budget)) });
-    const result = await acquireAttempt(input, { ...options, attemptNumber: 1, transport });
+    const { budget } = options;
+    event('INTENTO', { number: '1/1', transport: 'firefox', phase: 'starting', remainingSeconds: seconds(timeRemaining(budget)) });
+    const result = await acquireAttempt(input, { ...options, attemptNumber: 1 });
     const summary = attemptSummary(result, 1, timeRemaining(budget));
     result.acquisition.attempts = [summary];
     result.acquisition.attemptCount = 1;
     event('INTENTO_RESULTADO', { ...summary, totalNavigationCount: summary.navigationCount });
     event('ADQUISICION', { status: result.acquisition.status, seconds: result.acquisition.seconds,
         navigationCount: result.acquisition.navigationCount, attempts: 1, browserClosed: result.acquisition.browserClosed,
-        transport });
+        transport: 'firefox' });
     return result;
 }

@@ -2,20 +2,20 @@
 import { Actor } from 'apify';
 import { randomUUID } from 'node:crypto';
 import { parseInput } from './input.js';
-import { proxySettings, configureProxy } from './proxy.js';
-import { extractHtml } from './extract.js';
-import { assertProduct } from './contract.js';
-import { acquire } from './browser.js';
-import { Budget, bounded } from './budget.js';
-import { event, navigationFailure } from './diagnostics.js';
-import { ExtractionError } from './values.js';
+import { proxySettings, configureProxy } from '../acquisition/proxy.js';
+import { acquire as acquireFirefox } from '../acquisition/firefox.js';
+import { extractHtml } from '../product/extraction.js';
+import { assertProduct } from '../product/contract.js';
+import { Budget, bounded } from '../shared/budget.js';
+import { event, navigationFailure } from '../shared/diagnostics.js';
+import { ExtractionError } from '../shared/values.js';
 
-export async function runActor({ actor = Actor, budget = new Budget(), rawInput, offlineHtml,
-    acquireFn = acquire, firefoxAcquireFn, httpAcquireFn, proxyFn = configureProxy } = {}) {
+export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
+    acquireFn = acquireFirefox, proxyFn = configureProxy } = {}) {
     const state = { source: 'backmarket', runtime: 'javascript', extractionMethod: 'nuxt',
         runId: randomUUID(), startedAt: new Date().toISOString(), status: 'running',
         stage: 'actor-init', savedResults: 0, extractionPerformed: false, timings: {}, error: null };
-    let metadata = {}, exitCode = 0, initialized = false, input, retainedFailure, recoveryAttempted = false;
+    let metadata = {}, exitCode = 0, initialized = false, input, retainedFailure;
     const controller = new AbortController();
     let workTimer, completed, abortCode = 'RUN_TIME_LIMIT';
     const done = new Promise(resolve => { completed = resolve; });
@@ -40,55 +40,45 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
         if (rawInput !== undefined) await actor.setValue(process.env.ACTOR_INPUT_KEY || 'INPUT', rawInput);
         input = parseInput(await bounded(actor.getInput(), budget.remaining(), null, 'input'));
         budget.configure(input);
-        state.transport = input.transport;
-        event('TRANSPORTE', { transport: input.transport });
+        state.transport = 'firefox';
+        event('TRANSPORTE', { transport: 'firefox' });
         state.diagnosticMode = input.diagnosticMode;
-        state.executionMode = offlineHtml === undefined ? 'live' : 'offline';
+        state.executionMode = 'live';
         state.timeBudget = { processSeconds: budget.total / 1000, acquisitionSeconds: budget.acquisition / 1000, workSeconds: budget.work / 1000 };
         workTimer = setTimeout(() => controller.abort(), budget.remaining());
-        const settings = proxySettings(input, { requireAuthorization: offlineHtml === undefined });
+        const settings = proxySettings(input);
         state.proxy = { ...settings, status: settings.enabled ? 'pending' : 'disabled', connected: null, documentRequestSucceeded: null };
         await actor.setValue('RUN_STATE', state);
         event('LIMITES', { ...state.timeBudget, diagnosticMode: input.diagnosticMode });
-        let html, responses = {};
-        if (offlineHtml === undefined) {
-            state.stage = 'proxy-setup';
-            const proxy = await timed('proxySetup', () => bounded(proxyFn(actor, settings), Math.min(10000, budget.remaining()), controller.signal, 'proxy-setup'));
-            if (settings.enabled) state.proxy.status = 'configured';
-            event('PROXY', { enabled: settings.enabled, mode: settings.mode, groups: settings.groups,
-                country: settings.country, status: state.proxy.status, connected: null });
-            state.stage = 'acquisition';
-            const acquireTransport = input.transport === 'undici' ? httpAcquireFn ?? (await import('./http_undici.js')).acquire
-                : input.transport === 'firefox' ? firefoxAcquireFn ?? (await import('./firefox.js')).acquire : acquireFn;
-            let result;
-            try {
-                result = await timed('acquisition', () => acquireTransport(input, { proxy, proxyMode: settings.mode, budget, signal: controller.signal }));
-            } finally {
-                event('TIEMPO_ADQUISICION', { transport: input.transport, seconds: state.timings.acquisition });
-            }
-            html = result.html; responses = result.responses; state.acquisition = result.acquisition;
-            recoveryAttempted = state.acquisition.recovery?.attempted === true;
-            const document = state.acquisition.requests?.filter(r => r.category === 'document').at(-1);
-            const firefoxBridgeFailed = input.transport === 'firefox'
-                && /^PROXY_(?:BRIDGE|UPSTREAM)_/.test(state.acquisition.error?.code ?? '');
-            const firefoxBridgeReady = input.transport === 'firefox' && state.acquisition.proxyBridge?.status === 'ready';
-            state.proxy.connected = firefoxBridgeFailed ? false : document
-                ? (firefoxBridgeReady ? true : document.httpStatus !== 407)
-                : null;
-            state.proxy.documentRequestSucceeded = Boolean(document?.httpStatus === 200 && state.acquisition.status === 'received');
-            if (state.acquisition.status !== 'received') {
-                const error = state.acquisition.error ?? { code: 'ACQUISITION_ERROR' };
-                if (!html || !state.acquisition.candidateBeforeAccessFailure)
-                    throw new ExtractionError(error.code, state.acquisition.failureStage ?? 'acquisition', state.acquisition.status);
-                retainedFailure = { status: state.acquisition.status, error };
-            }
-            state.extractionPerformed = true;
-            input._documentUrl = state.acquisition.finalUrl;
-        } else {
-            html = offlineHtml;
-            state.acquisition = { status: 'offline', source: 'saved-commercial-html', navigationCount: 0, directApiRequests: 0 };
-            state.proxy.status = 'not-used-offline';
+        state.stage = 'proxy-setup';
+        const proxy = await timed('proxySetup', () => bounded(proxyFn(actor, settings), Math.min(10000, budget.remaining()), controller.signal, 'proxy-setup'));
+        if (settings.enabled) state.proxy.status = 'configured';
+        event('PROXY', { enabled: settings.enabled, mode: settings.mode, groups: settings.groups,
+            country: settings.country, status: state.proxy.status, connected: null });
+        state.stage = 'acquisition';
+        let acquisitionResult;
+        try {
+            acquisitionResult = await timed('acquisition', () => acquireFn(input, { proxy, proxyMode: settings.mode, budget, signal: controller.signal }));
+        } finally {
+            event('TIEMPO_ADQUISICION', { transport: 'firefox', seconds: state.timings.acquisition });
         }
+        const { html, responses = {} } = acquisitionResult;
+        state.acquisition = acquisitionResult.acquisition;
+        const document = state.acquisition.requests?.filter(r => r.category === 'document').at(-1);
+        const firefoxBridgeFailed = /^PROXY_(?:BRIDGE|UPSTREAM)_/.test(state.acquisition.error?.code ?? '');
+        const firefoxBridgeReady = state.acquisition.proxyBridge?.status === 'ready';
+        state.proxy.connected = firefoxBridgeFailed ? false : document
+            ? (firefoxBridgeReady ? true : document.httpStatus !== 407)
+            : null;
+        state.proxy.documentRequestSucceeded = Boolean(document?.httpStatus === 200 && state.acquisition.status === 'received');
+        if (state.acquisition.status !== 'received') {
+            const error = state.acquisition.error ?? { code: 'ACQUISITION_ERROR' };
+            if (!html || !state.acquisition.candidateBeforeAccessFailure)
+                throw new ExtractionError(error.code, state.acquisition.failureStage ?? 'acquisition', state.acquisition.status);
+            retainedFailure = { status: state.acquisition.status, error };
+        }
+        state.extractionPerformed = true;
+        input._documentUrl = state.acquisition.finalUrl;
         state.stage = 'transformation';
         const result = await timed('extraction', async () => extractHtml(html, input, responses));
         const { output, missing, commercial } = result; metadata = result.metadata;
@@ -113,7 +103,7 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
         if (controller.signal.aborted) throw new ExtractionError('RUN_TIME_LIMIT', state.stage, 'error');
         if (retainedFailure && !(output.price !== null && output.images?.length && metadata.priceVerification.status === 'verified'))
             throw new ExtractionError(retainedFailure.error.code, state.acquisition.failureStage ?? 'acquisition', retainedFailure.status);
-        state.status = retainedFailure?.status ?? (offlineHtml === undefined && !missing.length ? 'success' : 'partial');
+        state.status = retainedFailure?.status ?? (!missing.length ? 'success' : 'partial');
         state.error = retainedFailure?.error ?? null; state.missingFields = missing;
         metadata.missingFields = missing;
         metadata.sourceDiagnostics.missingFields = missing;
@@ -125,19 +115,15 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
         event('DATOS_FALTANTES', { fields: missing });
         state.stage = 'storage';
         await timed('datasetSave', async () => {
-            if (offlineHtml === undefined) await bounded(actor.pushData(output), budget.remaining(), controller.signal, 'dataset-save');
-            else {
-                const dataset = await actor.openDataset('offline-validation');
-                await bounded(dataset.pushData(output), budget.remaining(), controller.signal, 'dataset-save');
-            }
+            await bounded(actor.pushData(output), budget.remaining(), controller.signal, 'dataset-save');
         });
         state.savedResults = 1;
-        const usableLiveProduct = offlineHtml === undefined && !retainedFailure && state.productDocument.verified
+        const usableLiveProduct = !retainedFailure && state.productDocument.verified
             && metadata.priceVerification.status === 'verified' && output.price !== null && state.savedResults === 1;
         exitCode = usableLiveProduct ? 0 : 1;
         state.counts = { images: output.images?.length ?? 0, characteristics: output.characteristics?.length ?? 0,
             groups: output.variations?.length ?? 0, options: output.variations?.reduce((n,g) => n + g.variants.length,0) ?? 0 };
-        event('GUARDADO', { dataset: offlineHtml === undefined ? 'default' : 'offline-validation', records: 1, fields: 11 });
+        event('GUARDADO', { dataset: 'default', records: 1, fields: 11 });
         if (state.status === 'partial' && usableLiveProduct)
             event('PRODUCTO_PARCIAL_UTILIZABLE', { status: state.status, missingFields: missing, savedResults: state.savedResults }, 'warning');
         state.stage = 'finished';
@@ -189,20 +175,6 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
                 await bounded(actor.setValue('PRODUCT_METADATA', metadata), Math.max(1, budget.remaining(budget.total) - 1000), null, 'metadata-save');
                 await bounded(actor.setValue('RUN_STATE', state), Math.max(1, budget.remaining(budget.total) - 1000), null, 'state-save');
             } catch { event('DIAGNOSTICO', { code: 'PERSISTENCE_FAILED' }, 'warning'); exitCode = 1; }
-        }
-        if (recoveryAttempted) {
-            const productVerified = state.productDocument?.verified === true;
-            const priceVerified = metadata.priceVerification?.status === 'verified';
-            const saved = state.savedResults === 1;
-            const recovered = exitCode === 0 && state.acquisition?.recovery?.acquisitionReceived === true
-                && productVerified && priceVerified && saved;
-            event(recovered ? 'RECUPERACION_EXITOSA' : 'RECUPERACION_FALLIDA', {
-                stage: state.stage, status: state.status,
-                code: recovered ? null : state.error?.code ?? state.acquisition?.recovery?.finalCode ?? 'RECOVERY_VALIDATION_FAILED',
-                attempts: state.acquisition?.attemptCount ?? 2,
-                navigationCount: state.acquisition?.navigationCount ?? 0,
-                productVerified, priceVerified, savedResults: state.savedResults,
-            }, recovered ? 'info' : 'warning');
         }
         event('FIN', { transport: state.transport ?? null, status: state.status, savedResults: state.savedResults, seconds: state.elapsedSeconds, code: state.error?.code ?? null });
         completed();

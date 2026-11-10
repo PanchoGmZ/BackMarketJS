@@ -1,5 +1,5 @@
 
-import { array, record } from './values.js';
+import { array, record } from '../shared/values.js';
 
 export const officialWeights = Object.freeze({
     'apple|iphone 15 plus': { raw: '201 g', kg: 0.201,

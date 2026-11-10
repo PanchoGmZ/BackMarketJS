@@ -3,8 +3,8 @@ import { createHash } from 'node:crypto';
 import { load } from 'cheerio';
 import { decode, findCommerce } from './nuxt.js';
 import { productWeight } from './weight.js';
-import { resolveShortIdentity, verifyShortOffer } from './product_identity.js';
-import { array, object, record, text, decimal, decimalEqual, imageUrl, UUID_RE, UUID_SOURCE } from './values.js';
+import { resolveShortIdentity, verifyShortOffer } from './identity.js';
+import { array, object, record, text, decimal, decimalEqual, imageUrl, UUID_RE, UUID_SOURCE } from '../shared/values.js';
 
 const parameters = new Set(['grade', 'battery', 'premium_grade', 'battery_confidence_experiment',
     'cheapest_for_first_picker', 'storage', 'color']);

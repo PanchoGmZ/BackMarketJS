@@ -1,80 +1,59 @@
 {
-  "title": "Back Market JavaScript - Nuxt",
+  "title": "BackMarketJS - Extractor de productos",
   "type": "object",
   "schemaVersion": 1,
-  "required": [
-    "url"
-  ],
+  "required": ["url"],
   "additionalProperties": false,
   "properties": {
     "url": {
       "title": "URL del producto",
       "type": "string",
-      "description": "HTTPS www.backmarket.com/en-us/p/slug con o sin /UUID. Parametros l y offerType conservados. Las URLs cortas requieren identidad y oferta seleccionada verificables en el documento; familias sin oferta se rechazan.",
+      "description": "URL HTTPS de una ficha de www.backmarket.com. Conserva los parametros comerciales l y offerType.",
       "editor": "textfield",
       "prefill": ""
     },
-    "transport": {
-      "title": "Transporte de adquisicion",
-      "type": "string",
-      "description": "Firefox es el transporte predeterminado tras validarse en Apify Cloud. Chromium conserva su ruta seleccionable. Undici obtiene HTML por HTTP sin navegador y sigue experimental. Sin fallback automatico.",
-      "editor": "select",
-      "enum": ["chromium", "firefox", "undici"],
-      "enumTitles": ["Chromium", "Firefox (validado en Cloud)", "Undici HTTP (experimental)"],
-      "default": "firefox"
-    },
     "firefoxFastMode": {
-      "title": "Experimental: Firefox rápido",
+      "title": "Firefox rapido (experimental)",
       "type": "boolean",
-      "description": "Solo para transport: firefox. Usa waitUntil commit, procesa el cuerpo HTML completo y bloquea imágenes, fuentes y multimedia del navegador. Scripts y solicitudes XHR/fetch siguen activos. Desactivado por defecto; puede devolver partial/error si la página no aporta evidencia comercial suficiente.",
+      "description": "Modo opcional no confirmado en Apify Cloud. Espera al commit y bloquea imagenes, fuentes y multimedia. Desactivado por defecto.",
       "default": false
     },
     "outputFormat": {
       "title": "Formato de salida",
       "type": "string",
-      "description": "Un producto agregado con once campos.",
-      "enum": [
-        "reference1688"
-      ],
+      "description": "Un producto agregado con once campos del contrato JSON 1688.",
+      "enum": ["reference1688"],
       "default": "reference1688"
     },
     "diagnosticMode": {
       "title": "Diagnostico extendido",
       "type": "boolean",
-      "description": "Normal: 55 s de proceso y 48 s de adquisicion. Diagnostico: limite configurable hasta 180 s.",
+      "description": "Modo normal: 55 segundos. El modo extendido permite hasta 180 segundos.",
       "default": false
     },
     "diagnosticTimeoutSeconds": {
-      "title": "Limite de diagnostico (s)",
+      "title": "Limite extendido (segundos)",
       "type": "integer",
-      "description": "Solo se aplica en diagnostico. Configura el timeout del run de Apify acorde a este valor.",
+      "description": "Solo se aplica si el diagnostico extendido esta activado.",
       "minimum": 30,
       "maximum": 180,
       "default": 180
     },
-    "disableHttp2": {
-      "title": "Experimental: desactivar HTTP/2 en Chromium",
-      "type": "boolean",
-      "description": "Anade --disable-http2 solo al habilitarlo. Prueba comparativa de transporte; no demuestra que HTTP/2 cause el fallo ni controla la conexion de Unblocker al destino.",
-      "default": false
-    },
     "proxyConfiguration": {
-      "sectionCaption": "Red opcional - acceso autorizado",
+      "sectionCaption": "Proxy Apify",
       "title": "Apify Proxy",
       "type": "object",
-      "description": "UNBLOCKER seleccionado por defecto. Puedes desactivarlo o elegir otro grupo. Requiere confirmar autorizacion y presupuesto. Sin URLs privadas ni rotacion manual de IP. Chromium permite una sola recuperacion tras ERR_TOO_MANY_RETRIES sin respuesta del documento. En UNBLOCKER TLS no valida la identidad HTTPS; modo temporal de diagnostico, no seguro para produccion.",
+      "description": "UNBLOCKER esta seleccionado por defecto. Requiere acceso autorizado y presupuesto disponible en la cuenta Apify. La autenticacion usa un proxy local temporal; no introduzcas credenciales manualmente.",
       "editor": "proxy",
       "default": {
         "useApifyProxy": true,
-        "apifyProxyGroups": [
-          "UNBLOCKER"
-        ]
+        "apifyProxyGroups": ["UNBLOCKER"]
       }
     },
     "proxyAccessAuthorized": {
       "title": "Confirmo autorizacion de acceso y presupuesto",
       "type": "boolean",
-      "description": "Declaracion del usuario sobre los permisos del proveedor y el grupo disponible; no concede permisos externos.",
+      "description": "Confirmacion del usuario; no concede permisos externos.",
       "default": false
     }
   }

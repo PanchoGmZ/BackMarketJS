@@ -13,4 +13,3 @@ reports
 *.pfx
 cookies*
 browser-profile*
-test/local-reference
