@@ -193,9 +193,52 @@ async function browserFixture(status,{optional=false,proxyMode='direct',proxy=nu
     const browser={newContext:async options=>{contextOptions=options;return{newPage:async()=>page};},close:async()=>{}};
     const input=parseInput({url:productUrl,...(disableHttp2 === undefined ? {} : {disableHttp2})});
     const budget=clock();budget.configure(input);
-    const result=await acquire(input,{budget,proxyMode,proxy,
+    const result=await acquire(input,{budget,proxyMode,proxy,sleepImpl:async()=>{},
         browserType:{launch:async options=>{launchOptions=options;return browser;}}});
     budget.stop();return{result,calls,contextOptions,launchOptions};
+}
+function browserSequence(outcomes,{productUrl=expected.url,documentHtml=html}={}) {
+    const stats={launches:0,navigations:0,closes:0,active:false,urls:[],launchOptions:[],contextOptions:[],trace:[]};
+    const browserType={launch:async options=>{
+        assert.equal(stats.active,false,'a new browser must not launch before the previous one closes');
+        const attempt=stats.launches++;
+        assert.ok(attempt<outcomes.length,'unexpected browser launch');
+        stats.active=true;stats.launchOptions.push(structuredClone(options));stats.trace.push('launch:'+attempt);
+        const page=new EventEmitter();
+        page.route=async()=>{};page.mainFrame=()=>page;page.url=()=>productUrl;page.content=async()=>documentHtml;
+        const request=()=>({isNavigationRequest:()=>true,frame:()=>page});
+        page.goto=async url=>{
+            stats.navigations++;stats.urls.push(url);stats.trace.push('goto:'+attempt);
+            assert.equal(url,productUrl);
+            const outcome=outcomes[attempt];
+            if(typeof outcome==='string'){
+                page.emit('requestfailed',{...request(),failure:()=>({errorText:'net::'+outcome})});
+                throw new Error('Page.goto: net::'+outcome);
+            }
+            const status=typeof outcome==='number'?outcome:outcome.status;
+            page.emit('response',{url:()=>productUrl,headers:()=>({'content-type':'text/html','cf-ray':'synthetic-ray'}),
+                status:()=>status,request,frame:()=>page,body:async()=>Buffer.from(documentHtml)});
+            if(typeof outcome==='object'&&outcome.failureCode){
+                page.emit('requestfailed',{...request(),failure:()=>({errorText:'net::'+outcome.failureCode})});
+                throw new Error('Page.goto: net::'+outcome.failureCode);
+            }
+            return {};
+        };
+        const browser={newContext:async options=>{
+            stats.contextOptions.push(structuredClone(options));
+            return {newPage:async()=>page};
+        },close:async()=>{assert.equal(stats.active,true);stats.active=false;stats.closes++;stats.trace.push('close:'+attempt);}};
+        return browser;
+    }};
+    return {browserType,stats};
+}
+async function acquireSequence(outcomes,{productUrl=expected.url,remainingMs=48000,remainingState=null,proxy=null,proxyMode='direct',sleepImpl=async()=>{},documentHtml=html}={}) {
+    const input=parseInput({url:productUrl});
+    const remaining=remainingState ?? {ms:remainingMs};
+    const budget={acquisition:remainingMs,remaining:()=>remaining.ms,stop(){}};
+    const {browserType,stats}=browserSequence(outcomes,{productUrl,documentHtml});
+    const result=await acquire(input,{budget,proxy,proxyMode,browserType,sleepImpl});
+    return {result,stats,input,remaining};
 }
 test('short URL receives the current document without inventing endpoint IDs or another navigation',async()=>{
     const {result,calls}=await browserFixture(200,{productUrl:expected.url.replace('/'+id,'')});
@@ -223,19 +266,107 @@ test('HTTP/2 experiment changes only the requested launch argument across connec
 });
 test('Unblocker retry exhaustion with no HTTP retains unknown cause and safe transport evidence',async()=>{
     const proxy={server:'http://proxy.invalid:8000',username:'groups-UNBLOCKER',password:'PRIVATE'};
-    const {result,calls,launchOptions,contextOptions}=await browserFixture(null,
-        {proxyMode:'unblocker',proxy,failureCode:'ERR_TOO_MANY_RETRIES'});
+    const {result,stats}=await acquireSequence(['ERR_TOO_MANY_RETRIES','ERR_TOO_MANY_RETRIES'],{proxyMode:'unblocker',proxy});
     const report=result.acquisition;
-    assert.equal(calls,1);assert.deepEqual(launchOptions.proxy,proxy);assert.equal(contextOptions.ignoreHTTPSErrors,true);
+    assert.equal(stats.navigations,2);assert.equal(stats.launches,2);assert.equal(stats.closes,2);assert.equal(stats.active,false);
+    assert.deepEqual(stats.launchOptions[0].proxy,proxy);assert.deepEqual(stats.launchOptions[1],stats.launchOptions[0]);
+    assert.equal(stats.contextOptions[0].ignoreHTTPSErrors,true);assert.equal(stats.contextOptions[1].ignoreHTTPSErrors,true);
     assert.equal(report.status,'error');assert.equal(report.error.code,'CHROMIUM_ERR_TOO_MANY_RETRIES');
-    assert.equal(report.requests.length,0);assert.equal(report.browserClosed,true);
+    assert.equal(report.requests.length,0);assert.equal(report.browserClosed,true);assert.equal(report.navigationCount,2);
+    assert.equal(report.attemptCount,2);assert.equal(report.attempts[0].code,'CHROMIUM_ERR_TOO_MANY_RETRIES');
+    assert.equal(report.recovery.attempted,true);assert.equal(report.recovery.acquisitionReceived,false);
     assert.equal(report.navigationError.httpStatus,null);assert.equal(report.navigationError.documentResponsesObserved,0);
     assert.equal(report.navigationError.underlyingCause,'undetermined');assert.equal(report.navigationError.source,'page.goto');
     assert.deepEqual(report.navigationError.requestFailureSignals,['ERR_TOO_MANY_RETRIES']);
-    assert.equal(report.navigationFailures[0].source,'requestfailed');
+    assert.equal(report.navigationFailures.length,2);assert.equal(report.navigationFailures[0].source,'requestfailed');
     assert.deepEqual(report.proxyTransport,{mode:'unblocker',configured:true,usernameProvided:true,passwordProvided:true,
         credentialBinding:'playwright-launch-fields'});
     assert.equal(JSON.stringify(report).includes('PRIVATE'),false);
+});
+test('transient retry exhaustion recovers with a new browser and preserves URL, proxy and commercial output',async()=>{
+    const productUrl=expected.url+'?l=12&offerType=selected-offer';
+    const proxy={server:'http://proxy.invalid:8000',username:'groups-UNBLOCKER',password:'PRIVATE'};
+    const sleeps=[];
+    const {result,stats}=await acquireSequence(['ERR_TOO_MANY_RETRIES',200],{productUrl,proxy,proxyMode:'unblocker',
+        sleepImpl:async ms=>sleeps.push(ms)});
+    const report=result.acquisition;
+    assert.equal(result.html,html);assert.deepEqual(stats.urls,[productUrl,productUrl]);
+    assert.deepEqual(sleeps,[2500]);assert.deepEqual(stats.trace,['launch:0','goto:0','close:0','launch:1','goto:1','close:1']);
+    assert.equal(stats.launches,2);assert.equal(stats.navigations,2);assert.equal(stats.closes,2);assert.equal(stats.active,false);
+    assert.deepEqual(stats.launchOptions[1],stats.launchOptions[0]);assert.equal(stats.launchOptions[1].proxy.username,proxy.username);
+    assert.equal(report.status,'received');assert.equal(report.navigationCount,2);assert.equal(report.attemptCount,2);
+    assert.equal(report.attempts[0].code,'CHROMIUM_ERR_TOO_MANY_RETRIES');assert.equal(report.attempts[1].status,'received');
+    assert.equal(report.recovery.attempted,true);assert.equal(report.recovery.acquisitionReceived,true);
+});
+test('successful first Chromium acquisition performs one navigation and no recovery wait',async()=>{
+    const sleeps=[];const {result,stats}=await acquireSequence([200],{sleepImpl:async ms=>sleeps.push(ms)});
+    assert.equal(result.acquisition.status,'received');assert.equal(result.acquisition.navigationCount,1);
+    assert.equal(result.acquisition.attemptCount,1);assert.equal(result.acquisition.recovery.attempted,false);
+    assert.equal(stats.launches,1);assert.equal(stats.navigations,1);assert.equal(stats.closes,1);assert.deepEqual(sleeps,[]);
+});
+test('HTTP 403 and 429 never trigger Chromium recovery',async()=>{
+    for(const status of [403,429]){
+        const {result,stats}=await acquireSequence([status,200]);
+        assert.equal(result.acquisition.error.code,'HTTP_'+status);
+        assert.equal(result.acquisition.status,status===403?'blocked':'error');
+        assert.equal(result.acquisition.navigationCount,1);assert.equal(result.acquisition.recovery.attempted,false);
+        assert.equal(stats.launches,1);assert.equal(stats.navigations,1);assert.equal(stats.closes,1);
+    }
+});
+test('a document response observed before retry exhaustion prevents recovery',async()=>{
+    const {result,stats}=await acquireSequence([{status:204,failureCode:'ERR_TOO_MANY_RETRIES'},200]);
+    assert.equal(result.acquisition.error.code,'CHROMIUM_ERR_TOO_MANY_RETRIES');
+    assert.equal(result.acquisition.navigationError.documentResponsesObserved,1);
+    assert.equal(result.acquisition.navigationError.httpStatus,204);
+    assert.equal(result.acquisition.recovery.attempted,false);assert.equal(result.acquisition.navigationCount,1);
+    assert.equal(stats.launches,1);assert.equal(stats.navigations,1);assert.equal(stats.closes,1);
+});
+test('if the second attempt gets HTTP 403, its real blocked result remains final',async()=>{
+    const {result,stats}=await acquireSequence(['ERR_TOO_MANY_RETRIES',403]);
+    assert.equal(result.acquisition.status,'blocked');assert.equal(result.acquisition.error.code,'HTTP_403');
+    assert.deepEqual(result.acquisition.attempts.map(attempt=>attempt.code),['CHROMIUM_ERR_TOO_MANY_RETRIES','HTTP_403']);
+    assert.equal(result.acquisition.recovery.finalCode,'HTTP_403');
+    assert.equal(result.acquisition.navigationCount,2);assert.equal(stats.launches,2);assert.equal(stats.closes,2);
+});
+test('explicit proxy-auth, TLS and challenge failures never trigger recovery',async()=>{
+    for(const code of ['ERR_PROXY_AUTH_REQUESTED','ERR_CERT_AUTHORITY_INVALID','ERR_TUNNEL_CONNECTION_FAILED']){
+        const {result,stats}=await acquireSequence([code,'ERR_TOO_MANY_RETRIES'],{proxyMode:'unblocker',
+            proxy:{server:'http://proxy.invalid:8000',username:'groups-UNBLOCKER',password:'PRIVATE'}});
+        assert.equal(stats.launches,1);assert.equal(stats.navigations,1);assert.equal(stats.closes,1);
+        assert.equal(result.acquisition.recovery.attempted,false);assert.equal(result.acquisition.navigationCount,1);
+    }
+    const challenged='<html><head><title>Just a moment</title></head><body>blocked</body></html>';
+    const {result,stats}=await acquireSequence([200,200],{documentHtml:challenged});
+    assert.equal(result.acquisition.status,'blocked');assert.equal(result.acquisition.error.code,'ACCESS_CHALLENGE');
+    assert.equal(stats.launches,1);assert.equal(stats.navigations,1);assert.equal(result.acquisition.recovery.attempted,false);
+});
+test('recovery is omitted when the remaining acquisition window is insufficient',async()=>{
+    const sleeps=[];const {result,stats}=await acquireSequence(['ERR_TOO_MANY_RETRIES','ERR_TOO_MANY_RETRIES'],
+        {remainingMs:14000,sleepImpl:async ms=>sleeps.push(ms)});
+    assert.equal(result.acquisition.error.code,'CHROMIUM_ERR_TOO_MANY_RETRIES');
+    assert.equal(result.acquisition.recovery.attempted,false);assert.equal(result.acquisition.recovery.skippedReason,'insufficient-time');
+    assert.equal(result.acquisition.navigationCount,1);assert.equal(stats.launches,1);assert.equal(stats.navigations,1);
+    assert.equal(stats.closes,1);assert.deepEqual(sleeps,[]);
+});
+test('recovery rechecks the shared budget after waiting instead of resetting it',async()=>{
+    const remaining={ms:15000};
+    const run=await acquireSequence(['ERR_TOO_MANY_RETRIES','ERR_TOO_MANY_RETRIES'],{remainingMs:15000,remainingState:remaining,
+        sleepImpl:async()=>{remaining.ms=11999;}});
+    assert.equal(run.result.acquisition.recovery.attempted,false);
+    assert.equal(run.result.acquisition.recovery.skippedReason,'insufficient-time-after-wait');
+    assert.equal(run.stats.launches,1);assert.equal(run.stats.navigations,1);assert.equal(run.stats.closes,1);
+});
+test('recovered live acquisition preserves the eleven-field 1688 Dataset contract',async()=>{
+    const actor=new FakeActor({url:expected.url,proxyConfiguration:{useApifyProxy:false}});
+    const {browserType,stats}=browserSequence(['ERR_TOO_MANY_RETRIES',200],{productUrl:expected.url});
+    const result=await runActor({actor,budget:clock(),acquireFn:(input,context)=>acquire(input,{...context,browserType,sleepImpl:async()=>{}})});
+    assert.equal(result.state.status,'success');assert.equal(result.exitCode,0);
+    assert.equal(result.state.acquisition.recovery.attempted,true);
+    assert.equal(result.state.acquisition.recovery.acquisitionReceived,true);
+    assert.equal(result.state.acquisition.navigationCount,2);
+    assert.equal(stats.launches,2);assert.equal(stats.navigations,2);assert.equal(stats.closes,2);assert.equal(stats.active,false);
+    assert.deepEqual(actor.records,[expected]);assert.equal(Object.keys(actor.records[0]).length,11);
+    assert.deepEqual(actor.records[0],expected);assert.equal(result.state.savedResults,1);
 });
 test('document HTTP 407 and proxy 590 are HTTP errors, not retry exhaustion',async()=>{
     for(const [status,code] of [[407,'PROXY_AUTH_ERROR'],[590,'APIFY_PROXY_HTTP_590']]){

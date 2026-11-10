@@ -11,12 +11,18 @@ function visibleChallenge(html) {
     $('script,style,noscript').remove();
     return /just a moment|verify.*human|security verification|captcha/i.test(title) || /bot-need-challenge/i.test($('body').text());
 }
-export async function acquire(input, { proxy = null, proxyMode = 'direct', budget, signal, browserType = chromium } = {}) {
+const RECOVERY_DELAY_MS = 2500;
+// Keep enough time for a cold browser start, navigation, and bounded close.
+const MIN_SECOND_ATTEMPT_WINDOW_MS = 10000;
+const CLEANUP_RESERVE_MS = 2000;
+
+async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budget, signal, browserType = chromium,
+    attemptNumber = 1 } = {}) {
     const started = performance.now(), remaining = () => Math.min(budget.remaining(budget.acquisition), budget.remaining());
     const tlsVerified = proxyMode !== 'unblocker';
     const report = { status: 'running', navigationCount: 0, directApiRequests: 0, requests: [], redirects: [],
         resourceErrors: [], navigationFailures: [], browserClosed: false, stage: 'browser-start', tlsVerified,
-        http2Disabled: input.disableHttp2 === true };
+        http2Disabled: input.disableHttp2 === true, attemptNumber };
     report.proxyTransport = { mode: proxyMode, configured: Boolean(proxy),
         usernameProvided: Boolean(proxy?.username), passwordProvided: Boolean(proxy?.password),
         credentialBinding: proxy ? 'playwright-launch-fields' : 'none' };
@@ -179,7 +185,119 @@ export async function acquire(input, { proxy = null, proxyMode = 'direct', budge
         report.closeSeconds = (performance.now() - startClose) / 1000;
         report.seconds = (performance.now() - started) / 1000;
         if (html && report.status !== 'received') report.candidateBeforeAccessFailure = true;
-        event('ADQUISICION', { status: report.status, seconds: report.seconds, navigationCount: report.navigationCount, browserClosed: report.browserClosed });
+        event('ADQUISICION_INTENTO', { attempt: attemptNumber, status: report.status, seconds: report.seconds,
+            navigationCount: report.navigationCount, browserClosed: report.browserClosed });
     }
     return { html, responses, acquisition: report };
+}
+
+function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+async function waitForRecovery(ms, signal, sleepImpl) {
+    if (signal?.aborted) return false;
+    let onAbort;
+    const aborted = new Promise(resolve => {
+        onAbort = () => resolve(false);
+        signal?.addEventListener('abort', onAbort, { once: true });
+    });
+    try {
+        return await Promise.race([Promise.resolve().then(() => sleepImpl(ms)).then(() => true), aborted]);
+    } finally { signal?.removeEventListener('abort', onAbort); }
+}
+function timeRemaining(budget) {
+    return Math.max(0, Math.min(budget.remaining(budget.acquisition), budget.remaining()));
+}
+function seconds(ms) { return Math.round(ms) / 1000; }
+function retryEligible(result) {
+    const report = result?.acquisition;
+    return report?.error?.code === 'CHROMIUM_ERR_TOO_MANY_RETRIES'
+        && report.failureStage === 'navigation'
+        && report.navigationError?.source === 'page.goto'
+        && report.navigationError.documentResponsesObserved === 0
+        && !report.requests.some(request => request.category === 'document');
+}
+function attemptSummary(result, number, remainingMs) {
+    const report = result.acquisition;
+    return { number, seconds: report.seconds, remainingSeconds: seconds(remainingMs), status: report.status,
+        navigationCount: report.navigationCount, browserClosed: report.browserClosed,
+        code: report.error?.code ?? null,
+        documentResponsesObserved: report.navigationError?.documentResponsesObserved ?? null,
+        httpStatus: report.navigationError?.httpStatus ?? report.requests.filter(r => r.category === 'document').at(-1)?.httpStatus ?? null };
+}
+function finalizeAttempts(result, attempts, started, recovery) {
+    const report = result.acquisition;
+    report.attempts = attempts;
+    report.attemptCount = attempts.length;
+    report.navigationCount = attempts.reduce((count, attempt) => count + attempt.navigationCount, 0);
+    report.seconds = (performance.now() - started) / 1000;
+    report.recovery = recovery;
+    // Retain observations from both navigations while keeping the HTML and
+    // commercial response objects strictly from the final attempt.
+    for (const key of ['requests', 'redirects', 'resourceErrors', 'navigationFailures']) {
+        const earlier = attempts.length > 1 ? result._earlierAcquisition?.[key] ?? [] : [];
+        report[key] = [...earlier, ...(report[key] ?? [])];
+    }
+    delete result._earlierAcquisition;
+    event('ADQUISICION', { status: report.status, seconds: report.seconds, navigationCount: report.navigationCount,
+        attempts: report.attemptCount, browserClosed: report.browserClosed, recoveryAttempted: recovery.attempted });
+    return result;
+}
+
+export async function acquire(input, options = {}) {
+    const started = performance.now();
+    const { budget, signal, sleepImpl = delay } = options;
+    event('INTENTO', { number: '1/2', phase: 'starting', remainingSeconds: seconds(timeRemaining(budget)) });
+    const first = await acquireAttempt(input, { ...options, attemptNumber: 1 });
+    const attempts = [attemptSummary(first, 1, timeRemaining(budget))];
+    event('INTENTO_RESULTADO', { ...attempts[0], totalNavigationCount: attempts[0].navigationCount });
+    let recovery = { attempted: false, skippedReason: null, initialFailure: null };
+    if (!retryEligible(first)) {
+        recovery.skippedReason = 'not-eligible';
+        return finalizeAttempts(first, attempts, started, recovery);
+    }
+
+    recovery.initialFailure = first.acquisition.navigationError;
+    if (!first.acquisition.browserClosed) {
+        recovery.skippedReason = 'browser-close-failed';
+        event('RECUPERACION_OMITIDA', { reason: recovery.skippedReason, code: first.acquisition.closeError ?? 'BROWSER_NOT_CLOSED' }, 'warning');
+        return finalizeAttempts(first, attempts, started, recovery);
+    }
+
+    const beforeWaitMs = timeRemaining(budget);
+    if (beforeWaitMs < RECOVERY_DELAY_MS + MIN_SECOND_ATTEMPT_WINDOW_MS + CLEANUP_RESERVE_MS) {
+        recovery.skippedReason = 'insufficient-time';
+        event('RECUPERACION_OMITIDA', { reason: recovery.skippedReason, remainingSeconds: seconds(beforeWaitMs),
+            requiredSeconds: seconds(RECOVERY_DELAY_MS + MIN_SECOND_ATTEMPT_WINDOW_MS + CLEANUP_RESERVE_MS) }, 'warning');
+        return finalizeAttempts(first, attempts, started, recovery);
+    }
+
+    event('RECUPERACION', { motivo: 'CHROMIUM_ERR_TOO_MANY_RETRIES', remainingSeconds: seconds(beforeWaitMs),
+        delaySeconds: seconds(RECOVERY_DELAY_MS), maxNavigations: 2 });
+    event('ESPERA_RECUPERACION', { seconds: seconds(RECOVERY_DELAY_MS) });
+    const waited = await waitForRecovery(RECOVERY_DELAY_MS, signal, sleepImpl);
+    if (!waited) {
+        recovery.skippedReason = signal?.aborted ? 'aborted' : 'wait-interrupted';
+        event('RECUPERACION_OMITIDA', { reason: recovery.skippedReason, remainingSeconds: seconds(timeRemaining(budget)) }, 'warning');
+        return finalizeAttempts(first, attempts, started, recovery);
+    }
+    const afterWaitMs = timeRemaining(budget);
+    if (afterWaitMs < MIN_SECOND_ATTEMPT_WINDOW_MS + CLEANUP_RESERVE_MS) {
+        recovery.skippedReason = 'insufficient-time-after-wait';
+        event('RECUPERACION_OMITIDA', { reason: recovery.skippedReason, remainingSeconds: seconds(afterWaitMs) }, 'warning');
+        return finalizeAttempts(first, attempts, started, recovery);
+    }
+    if (signal?.aborted) {
+        recovery.skippedReason = 'aborted';
+        return finalizeAttempts(first, attempts, started, recovery);
+    }
+
+    recovery.attempted = true;
+    event('INTENTO', { number: '2/2', phase: 'starting', remainingSeconds: seconds(afterWaitMs),
+        navigationCount: attempts.reduce((count, attempt) => count + attempt.navigationCount, 0) });
+    const second = await acquireAttempt(input, { ...options, attemptNumber: 2 });
+    attempts.push(attemptSummary(second, 2, timeRemaining(budget)));
+    event('INTENTO_RESULTADO', { ...attempts[1], totalNavigationCount: attempts.reduce((count, attempt) => count + attempt.navigationCount, 0) });
+    recovery.acquisitionReceived = second.acquisition.status === 'received';
+    recovery.finalCode = second.acquisition.error?.code ?? null;
+    second._earlierAcquisition = first.acquisition;
+    return finalizeAttempts(second, attempts, started, recovery);
 }

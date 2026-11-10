@@ -15,7 +15,7 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
     const state = { source: 'backmarket', runtime: 'javascript', extractionMethod: 'nuxt',
         runId: randomUUID(), startedAt: new Date().toISOString(), status: 'running',
         stage: 'actor-init', savedResults: 0, extractionPerformed: false, timings: {}, error: null };
-    let metadata = {}, exitCode = 0, initialized = false, input, retainedFailure;
+    let metadata = {}, exitCode = 0, initialized = false, input, retainedFailure, recoveryAttempted = false;
     const controller = new AbortController();
     let workTimer, completed, abortCode = 'RUN_TIME_LIMIT';
     const done = new Promise(resolve => { completed = resolve; });
@@ -67,6 +67,7 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
                 event('TIEMPO_ADQUISICION', { transport: input.transport, seconds: state.timings.acquisition });
             }
             html = result.html; responses = result.responses; state.acquisition = result.acquisition;
+            recoveryAttempted = state.acquisition.recovery?.attempted === true;
             const document = state.acquisition.requests?.filter(r => r.category === 'document').at(-1);
             state.proxy.connected = document ? document.httpStatus !== 407 : null;
             state.proxy.documentRequestSucceeded = Boolean(document?.httpStatus === 200 && state.acquisition.status === 'received');
@@ -157,6 +158,20 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
                 await bounded(actor.setValue('PRODUCT_METADATA', metadata), Math.max(1, budget.remaining(budget.total) - 1000), null, 'metadata-save');
                 await bounded(actor.setValue('RUN_STATE', state), Math.max(1, budget.remaining(budget.total) - 1000), null, 'state-save');
             } catch { event('DIAGNOSTICO', { code: 'PERSISTENCE_FAILED' }, 'warning'); exitCode = 1; }
+        }
+        if (recoveryAttempted) {
+            const productVerified = state.productDocument?.verified === true;
+            const priceVerified = metadata.priceVerification?.status === 'verified';
+            const saved = state.savedResults === 1;
+            const recovered = exitCode === 0 && state.acquisition?.recovery?.acquisitionReceived === true
+                && productVerified && priceVerified && saved;
+            event(recovered ? 'RECUPERACION_EXITOSA' : 'RECUPERACION_FALLIDA', {
+                stage: state.stage, status: state.status,
+                code: recovered ? null : state.error?.code ?? state.acquisition?.recovery?.finalCode ?? 'RECOVERY_VALIDATION_FAILED',
+                attempts: state.acquisition?.attemptCount ?? 2,
+                navigationCount: state.acquisition?.navigationCount ?? 0,
+                productVerified, priceVerified, savedResults: state.savedResults,
+            }, recovered ? 'info' : 'warning');
         }
         event('FIN', { transport: state.transport ?? null, status: state.status, savedResults: state.savedResults, seconds: state.elapsedSeconds, code: state.error?.code ?? null });
         completed();

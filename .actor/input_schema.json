@@ -56,7 +56,7 @@
       "sectionCaption": "Red opcional - acceso autorizado",
       "title": "Apify Proxy",
       "type": "object",
-      "description": "UNBLOCKER seleccionado por defecto. Puedes desactivarlo o elegir otro grupo. Requiere confirmar autorizacion y presupuesto. Sin URLs privadas ni reintentos. En UNBLOCKER TLS no valida la identidad HTTPS; modo temporal de diagnostico, no seguro para produccion.",
+      "description": "UNBLOCKER seleccionado por defecto. Puedes desactivarlo o elegir otro grupo. Requiere confirmar autorizacion y presupuesto. Sin URLs privadas ni rotacion manual de IP. Chromium permite una sola recuperacion tras ERR_TOO_MANY_RETRIES sin respuesta del documento. En UNBLOCKER TLS no valida la identidad HTTPS; modo temporal de diagnostico, no seguro para produccion.",
       "editor": "proxy",
       "default": {
         "useApifyProxy": true,
