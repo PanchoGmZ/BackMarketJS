@@ -52,7 +52,7 @@ export function parseInput(raw, env = process.env) {
     const value = { transport: 'chromium', outputFormat: 'reference1688', diagnosticMode: false, diagnosticTimeoutSeconds: 180, disableHttp2: false,
         proxyConfiguration: { useApifyProxy: true, apifyProxyGroups: ['UNBLOCKER'] },
         proxyAccessAuthorized: false, ...raw };
-    if (typeof value.url !== 'string' || !['chromium', 'undici'].includes(value.transport) || value.outputFormat !== 'reference1688'
+    if (typeof value.url !== 'string' || !['chromium', 'firefox', 'undici'].includes(value.transport) || value.outputFormat !== 'reference1688'
         || typeof value.diagnosticMode !== 'boolean' || typeof value.disableHttp2 !== 'boolean' || !Number.isInteger(value.diagnosticTimeoutSeconds)
         || value.diagnosticTimeoutSeconds < 30 || value.diagnosticTimeoutSeconds > 180) throw new ExtractionError('INVALID_INPUT', 'input');
     const identity = productUrlIdentity(value.url);

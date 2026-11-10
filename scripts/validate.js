@@ -18,7 +18,7 @@ assert.deepEqual(input.properties.proxyConfiguration.default.apifyProxyGroups,['
 assert.equal(input.properties.diagnosticMode.default,false);
 assert.equal(input.properties.disableHttp2.default,false);
 assert.equal(input.properties.transport.default,'chromium');
-assert.deepEqual(input.properties.transport.enum,['chromium','undici']);
+assert.deepEqual(input.properties.transport.enum,['chromium','firefox','undici']);
 const ajv=new Ajv({strict:false,allErrors:true});addFormats(ajv);
 ajv.compile(input); const dataset=json('.actor/dataset_schema.json');ajv.compile(dataset.fields);
 assert.equal(Object.keys(dataset.fields.properties).length,11);
@@ -26,4 +26,8 @@ for(const collection of Object.values(json('.actor/key_value_store_schema.json')
 assert.equal(json('.actor/output_schema.json').properties.products.template,'{{links.apiDefaultDatasetUrl}}/items');
 const pkg=json('package.json'),lock=json('package-lock.json');
 for(const [name,version] of Object.entries(pkg.dependencies))assert.equal(lock.packages['node_modules/'+name].version,version);
-process.stdout.write('Syntax, four JSON schemas, eleven-field contract, defaults and dependency lock: passed.\n');
+const dockerfile=readFileSync('Dockerfile','utf8');
+assert.match(dockerfile,/playwright install --with-deps chromium firefox/);
+const browserManifest=json('node_modules/playwright-core/browsers.json');
+assert.ok(browserManifest.browsers.some(browser=>browser.name==='firefox'&&browser.browserVersion&&browser.revision));
+process.stdout.write('Syntax, four JSON schemas, eleven-field contract, defaults, dependency lock and Firefox Docker browser: passed.\n');

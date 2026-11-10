@@ -9,6 +9,7 @@ import { Budget } from '../src/budget.js';
 import { proxySettings, configureProxy } from '../src/proxy.js';
 import { parseInput } from '../src/input.js';
 import { acquire } from '../src/browser.js';
+import { acquire as acquireFirefox } from '../src/firefox.js';
 import { classifyHttp, navigationFailure } from '../src/diagnostics.js';
 import { extractHtml } from '../src/extract.js';
 log.setLevel(log.LEVELS.OFF);
@@ -198,7 +199,7 @@ async function browserFixture(status,{optional=false,proxyMode='direct',proxy=nu
     budget.stop();return{result,calls,contextOptions,launchOptions};
 }
 function browserSequence(outcomes,{productUrl=expected.url,documentHtml=html}={}) {
-    const stats={launches:0,navigations:0,closes:0,active:false,urls:[],launchOptions:[],contextOptions:[],trace:[]};
+    const stats={launches:0,navigations:0,closes:0,active:false,urls:[],gotoOptions:[],launchOptions:[],contextOptions:[],trace:[]};
     const browserType={launch:async options=>{
         assert.equal(stats.active,false,'a new browser must not launch before the previous one closes');
         const attempt=stats.launches++;
@@ -207,14 +208,16 @@ function browserSequence(outcomes,{productUrl=expected.url,documentHtml=html}={}
         const page=new EventEmitter();
         page.route=async()=>{};page.mainFrame=()=>page;page.url=()=>productUrl;page.content=async()=>documentHtml;
         const request=()=>({isNavigationRequest:()=>true,frame:()=>page});
-        page.goto=async url=>{
+        page.goto=async (url,options)=>{
             stats.navigations++;stats.urls.push(url);stats.trace.push('goto:'+attempt);
+            stats.gotoOptions.push(structuredClone(options));
             assert.equal(url,productUrl);
             const outcome=outcomes[attempt];
             if(typeof outcome==='string'){
                 page.emit('requestfailed',{...request(),failure:()=>({errorText:'net::'+outcome})});
                 throw new Error('Page.goto: net::'+outcome);
             }
+            if(typeof outcome==='object'&&outcome.pending)return new Promise(()=>{});
             const status=typeof outcome==='number'?outcome:outcome.status;
             page.emit('response',{url:()=>productUrl,headers:()=>({'content-type':'text/html','cf-ray':'synthetic-ray'}),
                 status:()=>status,request,frame:()=>page,body:async()=>Buffer.from(documentHtml)});
@@ -240,6 +243,75 @@ async function acquireSequence(outcomes,{productUrl=expected.url,remainingMs=480
     const result=await acquire(input,{budget,proxy,proxyMode,browserType,sleepImpl});
     return {result,stats,input,remaining};
 }
+test('Firefox Playwright transport uses one browser lifecycle, forwards Apify proxy auth, shares Nuxt parser and preserves 1688 output',async()=>{
+    const proxy={server:'http://proxy.invalid:8000',username:'groups-UNBLOCKER',password:'PRIVATE'};
+    const actor=new FakeActor({url:expected.url,transport:'firefox',
+        proxyConfiguration:{useApifyProxy:true,apifyProxyGroups:['UNBLOCKER']},proxyAccessAuthorized:true});
+    const {browserType,stats}=browserSequence([200],{productUrl:expected.url});
+    const result=await runActor({actor,budget:clock(),proxyFn:async()=>proxy,
+        firefoxAcquireFn:(input,context)=>acquireFirefox(input,{...context,browserType})});
+    const report=result.state.acquisition;
+    assert.equal(result.state.transport,'firefox');assert.equal(result.state.status,'success');assert.equal(result.exitCode,0);
+    assert.equal(report.transport,'firefox');assert.equal(report.status,'received');assert.equal(report.attemptCount,1);
+    assert.equal(report.navigationCount,1);assert.equal(report.requests[0].httpStatus,200);
+    assert.equal(report.tlsVerified,false);assert.equal(report.http2Disabled,false);
+    assert.deepEqual(stats.urls,[expected.url]);assert.equal(stats.navigations,1);
+    assert.equal(stats.closes,1);assert.equal(stats.active,false);
+    assert.equal(stats.launchOptions[0].proxy.server,proxy.server);
+    assert.equal(stats.launchOptions[0].proxy.username,proxy.username);
+    assert.equal(stats.launchOptions[0].proxy.password,proxy.password);
+    assert.equal(Object.hasOwn(stats.launchOptions[0],'args'),false);
+    assert.equal(Object.hasOwn(stats.launchOptions[0],'channel'),false);
+    assert.equal(stats.contextOptions[0].ignoreHTTPSErrors,true);
+    assert.ok(stats.launchOptions[0].timeout>0);assert.ok(stats.gotoOptions[0].timeout>0);
+    assert.deepEqual(stats.trace,['launch:0','goto:0','close:0']);
+    assert.deepEqual(actor.records,[expected]);assert.equal(Object.keys(actor.records[0]).length,11);
+    assert.equal(JSON.stringify(result.state).includes('PRIVATE'),false);
+});
+test('Firefox applies the shared maximum HTML body size before returning a document',async()=>{
+    const input=parseInput({url:expected.url,transport:'firefox'},
+        {BACKMARKET_MAX_HTML_BYTES:'1024',BACKMARKET_MAX_MEMORY_MB:'1024'});
+    const {browserType,stats}=browserSequence([200],{productUrl:expected.url,documentHtml:html+' '.repeat(2048)});
+    const result=await acquireFirefox(input,{budget:{acquisition:48000,remaining:()=>48000},browserType});
+    assert.equal(result.acquisition.status,'partial');assert.equal(result.acquisition.error.code,'RESPONSE_TOO_LARGE');
+    assert.equal(result.acquisition.navigationCount,1);assert.equal(stats.navigations,1);assert.equal(stats.closes,1);
+});
+test('Firefox navigation timeout remains bounded by the shared acquisition budget and closes the browser',async()=>{
+    const input=parseInput({url:expected.url,transport:'firefox'});
+    const {browserType,stats}=browserSequence([{pending:true}]);
+    const result=await acquireFirefox(input,{budget:{acquisition:3000,remaining:()=>3000},browserType});
+    assert.equal(result.acquisition.status,'partial');assert.equal(result.acquisition.error.code,'TIMEOUT');
+    assert.equal(result.acquisition.navigationCount,1);assert.equal(stats.navigations,1);assert.equal(stats.closes,1);
+    assert.equal(stats.gotoOptions[0].timeout,1000);assert.equal(stats.active,false);
+});
+test('Firefox has no retry or engine fallback when its single navigation fails',async()=>{
+    const {browserType,stats}=browserSequence(['NS_ERROR_NET_RESET','NS_ERROR_NET_RESET']);
+    const input=parseInput({url:expected.url,transport:'firefox'});
+    const budget={acquisition:48000,remaining:()=>48000};
+    const result=await acquireFirefox(input,{budget,browserType});
+    assert.equal(result.acquisition.status,'error');assert.equal(result.acquisition.attemptCount,1);
+    assert.equal(result.acquisition.navigationCount,1);assert.equal(result.acquisition.error.code,'NETWORK_ERROR');
+    assert.equal(stats.launches,1);assert.equal(stats.navigations,1);assert.equal(stats.closes,1);
+    for(const status of [403,429]){
+        const denied=browserSequence([status,200]);
+        const responseResult=await acquireFirefox(input,{budget,browserType:denied.browserType});
+        assert.equal(responseResult.acquisition.navigationCount,1);assert.equal(responseResult.acquisition.error.code,'HTTP_'+status);
+        assert.equal(denied.stats.launches,1);assert.equal(denied.stats.navigations,1);assert.equal(denied.stats.closes,1);
+    }
+});
+test('Firefox classifies proxy authentication, TLS, DNS, network and timeout signals safely',()=>{
+    const cases=[
+        ['NS_ERROR_PROXY_AUTHENTICATION_FAILED','PROXY_AUTH_ERROR','proxy-authentication'],
+        ['SEC_ERROR_UNKNOWN_ISSUER','TLS_ERROR','tls'],
+        ['NS_ERROR_UNKNOWN_HOST','DNS_ERROR','dns'],
+        ['NS_ERROR_NET_RESET','NETWORK_ERROR','network'],
+        ['NS_ERROR_NET_TIMEOUT','TIMEOUT','timeout'],
+    ];
+    for(const [signal,code,category] of cases){
+        const result=navigationFailure('page.goto: '+signal);
+        assert.equal(result.code,code);assert.equal(result.category,category);assert.deepEqual(result.signals,[signal]);
+    }
+});
 test('short URL receives the current document without inventing endpoint IDs or another navigation',async()=>{
     const {result,calls}=await browserFixture(200,{productUrl:expected.url.replace('/'+id,'')});
     assert.equal(calls,1);assert.equal(result.acquisition.status,'received');

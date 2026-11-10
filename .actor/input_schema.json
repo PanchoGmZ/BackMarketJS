@@ -17,10 +17,10 @@
     "transport": {
       "title": "Transporte de adquisicion",
       "type": "string",
-      "description": "Chromium conserva la adquisicion actual. Undici obtiene HTML por HTTP sin navegador; experimental, pendiente de validar fichas reales en Cloud. Ambos usan el mismo parser Nuxt. Sin fallback automatico.",
+      "description": "Chromium conserva la adquisicion actual. Firefox usa Playwright con una navegacion y el mismo parser Nuxt. Undici obtiene HTML por HTTP sin navegador; experimental. Firefox y Undici pendientes de validar fichas reales en Cloud. Sin fallback automatico.",
       "editor": "select",
-      "enum": ["chromium", "undici"],
-      "enumTitles": ["Chromium (actual)", "Undici HTTP (experimental)"],
+      "enum": ["chromium", "firefox", "undici"],
+      "enumTitles": ["Chromium (actual)", "Firefox (experimental)", "Undici HTTP (experimental)"],
       "default": "chromium"
     },
     "outputFormat": {

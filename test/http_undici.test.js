@@ -54,9 +54,9 @@ test('transport defaults to Chromium; runtime and Apify schema reject invalid va
     const validate = new Ajv({ strict: false }).compile(schema);
     const url = fixture().expected.url;
     assert.equal(schema.properties.transport.default, 'chromium');
-    assert.deepEqual(schema.properties.transport.enum, ['chromium', 'undici']);
+    assert.deepEqual(schema.properties.transport.enum, ['chromium', 'firefox', 'undici']);
     assert.equal(parseInput({ url }).transport, 'chromium');
-    for (const transport of ['chromium', 'undici']) { assert.equal(parseInput({ url, transport }).transport, transport); assert.equal(validate({ url, transport }), true); }
+    for (const transport of ['chromium', 'firefox', 'undici']) { assert.equal(parseInput({ url, transport }).transport, transport); assert.equal(validate({ url, transport }), true); }
     for (const transport of ['', 'UNDICI', null, false, {}, 'auto']) {
         assert.throws(() => parseInput({ url, transport }), e => e.code === 'INVALID_INPUT');
         assert.equal(validate({ url, transport }), false);

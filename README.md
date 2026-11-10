@@ -1,6 +1,6 @@
 # Back Market URL Extractor - JavaScript
 
-Version independiente del Actor Python de TU CUMPA. Node.js 22+ (Docker Node 24), Apify SDK, Playwright, Undici y Cheerio. Dos transportes seleccionables comparten el parser Nuxt que produjo resultados en Python. No necesita Python, Crawl4AI, LLM ni servicios de IA.
+Version independiente del Actor Python de TU CUMPA. Node.js 22+ (Docker Node 24), Apify SDK, Playwright, Undici y Cheerio. Tres transportes seleccionables comparten el parser Nuxt que produjo resultados en Python. No necesita Python, Crawl4AI, LLM ni servicios de IA.
 
 ## Estado comprobado
 
@@ -9,7 +9,7 @@ Version independiente del Actor Python de TU CUMPA. Node.js 22+ (Docker Node 24)
 - El usuario ha confirmado extracciones reales de telefonos en Apify Cloud. La ampliacion de URLs cortas se valida offline; las pruebas de transporte utilizan dobles de Playwright, sin sockets.
 - Dockerfile preparado; Docker Desktop esta instalado pero el motor Linux no esta disponible. La imagen no se ha construido.
 
-El Actor Python original y su repositorio permanecen intactos. Los transportes Chromium y Undici pertenecen a este mismo BackMarketJS y al mismo Actor existente.
+El Actor Python original y su repositorio permanecen intactos. Chromium, Firefox y Undici pertenecen a este mismo BackMarketJS y al mismo Actor existente.
 
 ## Entrada
 
@@ -34,7 +34,7 @@ Sin identidad u oferta verificables se devuelve `SHORT_URL_IDENTITY_UNVERIFIED`,
 
 Los identificadores de prueba solo aparecen en fixtures y pruebas. El extractor obtiene el UUID dinamicamente de la URL o de las evidencias comerciales verificadas de una ficha corta.
 
-En Apify, el selector **Transporte de adquisicion** ofrece `chromium` y `undici`. Si falta `transport`, se utiliza `chromium`, con el comportamiento anterior. `extractionMethod` sigue siendo `nuxt` en estado y metadata; no se reutiliza para elegir transporte. No hay fallback automatico.
+En Apify, el selector **Transporte de adquisicion** ofrece `chromium`, `firefox` y `undici`. Si falta `transport`, se utiliza `chromium`, con su comportamiento anterior. Firefox hace una navegacion Playwright sin reintentos y comparte la adquisicion de documento, el parser y las validaciones; su ejecucion real en Back Market queda pendiente de Cloud. `extractionMethod` sigue siendo `nuxt` en estado y metadata; no se reutiliza para elegir transporte. No hay fallback automatico.
 
 Input concreto para una prueba manual Undici en el Actor existente (la oferta/precio actual puede cambiar):
 
@@ -52,6 +52,21 @@ Input concreto para una prueba manual Undici en el Actor existente (la oferta/pr
 
 El usuario ejecutara las pruebas Cloud; no se han solicitado fichas reales con este modulo. El formulario nuevo requiere construir la version actualizada del mismo Actor desde `origin/main`. No hay que crear otro Actor. Para comparar, utiliza la misma URL/seleccion y cambia solo `transport`; configura un timeout externo de 180 s en este ejemplo.
 
+Firefox se instala junto con Chromium en Docker con `npx playwright install --with-deps chromium firefox`. `package-lock.json` fija Playwright 1.64.1, cuyo manifiesto instala Firefox revision 1555 (Firefox 157.0). El flag `--with-deps` instala las dependencias Linux del navegador durante la construccion, ejecutada como root antes de cambiar al usuario `node`. La API de Playwright admite proxy HTTP con `server`, `username` y `password`; las pruebas offline verifican que se pasan los campos de Apify, pero no autentican frente al proxy real. Firefox usa `ignoreHTTPSErrors` solo en su contexto y mantiene la excepcion existente limitada a UNBLOCKER. El transporte no se considera validado en Back Market hasta la prueba manual Cloud.
+
+Input para probar Firefox en el mismo Actor:
+
+```json
+{
+  "url": "https://www.backmarket.com/en-us/p/iphone-14-128-gb-midnight-att/ec6b3e5e-676e-40f9-91a6-1c9d8537209b?l=12",
+  "transport": "firefox",
+  "diagnosticMode": true,
+  "diagnosticTimeoutSeconds": 180,
+  "proxyConfiguration": { "useApifyProxy": true, "apifyProxyGroups": ["UNBLOCKER"] },
+  "proxyAccessAuthorized": true
+}
+```
+
 ## Ejecucion local con F5
 
 1. Abre esta carpeta JavaScript en VS Code.
@@ -60,7 +75,7 @@ El usuario ejecutara las pruebas Cloud; no se han solicitado fichas reales con e
 4. Selecciona "Back Market JS - Extraer producto" en Run and Debug y pulsa F5.
 5. Revisa storage/datasets/default/ y RUN_STATE/PRODUCT_METADATA en storage/key_value_stores/default/.
 
-La configuracion F5 importa INPUT.json al SDK. Se usa el nombre estandar para que el SDK conserve el archivo editable al limpiar sus registros locales de ejecucion. El SDK inicializa el almacenamiento local de este proyecto; sus registros no son los del Actor Python. En Windows se utiliza el Chrome existente mediante Playwright, visible y con perfil temporal nuevo. En Linux se usa Chromium headless; instalarlo con npx playwright install --with-deps chromium si ejecutas fuera de Docker.
+La configuracion F5 importa INPUT.json al SDK. Se usa el nombre estandar para que el SDK conserve el archivo editable al limpiar sus registros locales de ejecucion. El SDK inicializa el almacenamiento local de este proyecto; sus registros no son los del Actor Python. En Windows se utiliza Chrome para Chromium; Firefox requiere el binario Playwright instalado localmente. En Linux se usan Chromium/Firefox headless; instala ambos con `npx playwright install --with-deps chromium firefox` si ejecutas fuera de Docker.
 
 Desde terminal:
 
@@ -136,14 +151,15 @@ Logs: INICIO, TRANSPORTE, LIMITES, PROXY, TLS, INTENTO, INTENTO_RESULTADO, RECUP
 
 Las pruebas no hacen scraping, no lanzan navegador real y no consumen proxy. Incluyen equivalencia autentica, serializacion Nuxt sintetica de esos mismos datos, precios/IDs, pesos, privacidad, proxy/sesiones, HTTP, contrato y ciclo SDK simulado. La comprobacion offline real del SDK usa almacenamiento nuevo separado. No convierte una captura en prueba de acceso actual.
 
-## Probar los dos transportes en el Actor existente
+## Probar los tres transportes en el Actor existente
 
 1. Usa el mismo repositorio BackMarketJS, rama `main`, y el mismo Actor JavaScript ya configurado en Apify.
 2. Construye la nueva version cuando quieras probarla; no se han cambiado ajustes de la cuenta ni desplegado desde esta integracion.
 3. Conserva el Dockerfile actual y Chromium instalado para el transporte predeterminado.
-4. Prueba manualmente `transport: "undici"`, diagnosticMode=true y timeout externo 180 s, con proxy autorizado como en el ejemplo.
+4. Prueba manualmente `transport: "firefox"` con proxy autorizado, diagnosticMode=true y timeout externo 180 s.
 5. Compara contra `transport: "chromium"` con el MISMO producto/seleccion y datos contemporaneos; los precios pueden cambiar. Revisa JSON y PRODUCT_METADATA, no solo HTTP 200.
-6. Antes de retirar Chromium, comprueba otras selecciones, variantes, URLs cortas y latencia real. La referencia Git previa es `stable/chromium-before-undici-20261110` (commit `2522391`).
+6. Usa `transport: "undici"` como metodo experimental independiente.
+7. Antes de retirar un motor, comprueba otras selecciones, variantes, URLs cortas y latencia real. La referencia Git previa a Firefox es `stable/pre-firefox-20261110`.
 
 No se ha creado otro Actor ni ejecutado scraping, pruebas Cloud o solicitudes pagadas durante esta integracion. Las pruebas Cloud quedan a cargo del usuario.
 

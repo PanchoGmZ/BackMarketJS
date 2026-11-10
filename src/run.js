@@ -11,7 +11,7 @@ import { event, navigationFailure } from './diagnostics.js';
 import { ExtractionError } from './values.js';
 
 export async function runActor({ actor = Actor, budget = new Budget(), rawInput, offlineHtml,
-    acquireFn = acquire, httpAcquireFn, proxyFn = configureProxy } = {}) {
+    acquireFn = acquire, firefoxAcquireFn, httpAcquireFn, proxyFn = configureProxy } = {}) {
     const state = { source: 'backmarket', runtime: 'javascript', extractionMethod: 'nuxt',
         runId: randomUUID(), startedAt: new Date().toISOString(), status: 'running',
         stage: 'actor-init', savedResults: 0, extractionPerformed: false, timings: {}, error: null };
@@ -58,8 +58,8 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
             event('PROXY', { enabled: settings.enabled, mode: settings.mode, groups: settings.groups,
                 country: settings.country, status: state.proxy.status, connected: null });
             state.stage = 'acquisition';
-            const acquireTransport = input.transport === 'undici'
-                ? httpAcquireFn ?? (await import('./http_undici.js')).acquire : acquireFn;
+            const acquireTransport = input.transport === 'undici' ? httpAcquireFn ?? (await import('./http_undici.js')).acquire
+                : input.transport === 'firefox' ? firefoxAcquireFn ?? (await import('./firefox.js')).acquire : acquireFn;
             let result;
             try {
                 result = await timed('acquisition', () => acquireTransport(input, { proxy, proxyMode: settings.mode, budget, signal: controller.signal }));

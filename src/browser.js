@@ -17,12 +17,13 @@ const MIN_SECOND_ATTEMPT_WINDOW_MS = 10000;
 const CLEANUP_RESERVE_MS = 2000;
 
 async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budget, signal, browserType = chromium,
-    attemptNumber = 1 } = {}) {
+    attemptNumber = 1, transport = 'chromium' } = {}) {
     const started = performance.now(), remaining = () => Math.min(budget.remaining(budget.acquisition), budget.remaining());
     const tlsVerified = proxyMode !== 'unblocker';
     const report = { status: 'running', navigationCount: 0, directApiRequests: 0, requests: [], redirects: [],
         resourceErrors: [], navigationFailures: [], browserClosed: false, stage: 'browser-start', tlsVerified,
-        http2Disabled: input.disableHttp2 === true, attemptNumber };
+        http2Disabled: transport === 'chromium' && input.disableHttp2 === true, attemptNumber,
+        ...(transport === 'chromium' ? {} : { transport }) };
     report.proxyTransport = { mode: proxyMode, configured: Boolean(proxy),
         usernameProvided: Boolean(proxy?.username), passwordProvided: Boolean(proxy?.password),
         credentialBinding: proxy ? 'playwright-launch-fields' : 'none' };
@@ -82,15 +83,16 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
     let monitor;
     try {
         const launch = browserType.launch({ headless: process.env.APIFY_IS_AT_HOME === '1' || process.platform !== 'win32',
-            ...(report.http2Disabled ? { args: ['--disable-http2'] } : {}),
-            ...(process.platform === 'win32' && process.env.APIFY_IS_AT_HOME !== '1' ? { channel: 'chrome' } : {}),
+            ...(transport === 'chromium' && report.http2Disabled ? { args: ['--disable-http2'] } : {}),
+            ...(transport === 'chromium' && process.platform === 'win32' && process.env.APIFY_IS_AT_HOME !== '1' ? { channel: 'chrome' } : {}),
             timeout: Math.max(1, remaining() - 2000), ...(proxy ? { proxy } : {}) });
         launch.then(b => { if (closing) b.close().catch(() => {}); }, () => {});
         browser = await bounded(launch, remaining() - 2000, signal, 'browser-start');
         report.browserStartupSeconds = (performance.now() - started) / 1000;
         context = await bounded(browser.newContext({ ignoreHTTPSErrors: !tlsVerified }), remaining() - 2000, signal, 'context-start');
-        event('PROXY_TRANSPORTE', { ...report.proxyTransport, http2Disabled: report.http2Disabled });
-        event('TLS', { verified: tlsVerified });
+        event('PROXY_TRANSPORTE', { ...(transport === 'chromium' ? {} : { transport }), ...report.proxyTransport,
+            http2Disabled: report.http2Disabled });
+        event('TLS', { ...(transport === 'chromium' ? {} : { transport }), verified: tlsVerified });
         page = await context.newPage();
         // Bind events and routes before the only Page.goto().
         await page.route('**/*', async route => {
@@ -151,7 +153,7 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
             if (observation.mb > input.maxMemoryMb) fail('partial', 'MEMORY_LIMIT', 'resources');
         }).catch(() => {}); }, 1000);
         report.stage = 'navigation'; report.navigationCount = 1;
-        event('NAVEGACION', { count: 1, max: 1, waitUntil: 'domcontentloaded', retries: 0 });
+        event('NAVEGACION', { ...(transport === 'chromium' ? {} : { transport }), count: 1, max: 1, waitUntil: 'domcontentloaded', retries: 0 });
         const navigationStarted = performance.now();
         const navigation = page.goto(input.url, { waitUntil: 'domcontentloaded', timeout: Math.max(1, remaining() - 2000) })
             .then(async () => {
@@ -300,4 +302,19 @@ export async function acquire(input, options = {}) {
     recovery.finalCode = second.acquisition.error?.code ?? null;
     second._earlierAcquisition = first.acquisition;
     return finalizeAttempts(second, attempts, started, recovery);
+}
+
+// Single browser acquisition shared by the non-retrying Firefox transport.
+export async function acquireOnce(input, options = {}) {
+    const { budget, transport = 'chromium' } = options;
+    event('INTENTO', { number: '1/1', transport, phase: 'starting', remainingSeconds: seconds(timeRemaining(budget)) });
+    const result = await acquireAttempt(input, { ...options, attemptNumber: 1, transport });
+    const summary = attemptSummary(result, 1, timeRemaining(budget));
+    result.acquisition.attempts = [summary];
+    result.acquisition.attemptCount = 1;
+    event('INTENTO_RESULTADO', { ...summary, totalNavigationCount: summary.navigationCount });
+    event('ADQUISICION', { status: result.acquisition.status, seconds: result.acquisition.seconds,
+        navigationCount: result.acquisition.navigationCount, attempts: 1, browserClosed: result.acquisition.browserClosed,
+        transport });
+    return result;
 }
