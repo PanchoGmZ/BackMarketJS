@@ -1,5 +1,19 @@
 # Validacion de la migracion JavaScript
 
+## Integracion de transportes seleccionables (2026-11-10)
+
+Base verificada: `2522391a7c9bc3324eb5938ff65c5d89141ed451`, coincidente con `origin/main` tras fetch, arbol limpio y 47 pruebas previas aprobadas. Respaldo: `stable/chromium-before-undici-20261110`. El historial/reflog revisado no muestra otra base de transporte descartada; la opcion HTTP/2 existente sigue desactivada por defecto.
+
+- `transport` admite `chromium` (predeterminado) y `undici`, en el mismo Actor y repositorio. El metodo de extraccion sigue siendo Nuxt.
+- `src/browser.js`, proxy oficial, parser Nuxt, identidad, precios, peso, contrato, fixtures y esquema del Dataset permanecen intactos.
+- 94 pruebas offline aprobadas (47 anteriores y 47 nuevas): regresion Chromium completa, Undici 6.29.1 con MockAgent y red deshabilitada, adquisicion simulada a traves del Actor, equivalencia exacta de once campos para dos productos y estados success/partial/error/blocked.
+- Se prueban consultas comerciales, UUID/seleccion, Nuxt sintetico basado en comercio real, headers/cuerpo, limite del HTML descomprimido, 3xx/403/429, TLS/CONNECT/DNS/TCP/timeout, cierre, privacidad y diagnosticos.
+- SDK local real con entorno sin tokens/IDs Cloud, Dataset offline separado; esquemas Input/Dataset/Output/KVS comprobados mediante scripts y `apify validate-schema`.
+- No hay fallback ni nuevos parametros comerciales aceptados: se conservan `l` y `offerType`, y se rechazan los demas hasta contar con evidencia.
+- No se lanzaron navegadores reales, solicitudes a Back Market, proxies pagados ni runs Cloud. Las capturas son comerciales filtradas; el Nuxt usado en pruebas se identifica como sintetico. Acceso a fichas reales, seleccion aplicada por el servidor, cobertura y tiempos quedan pendientes de las pruebas manuales del usuario.
+
+Las siguientes secciones describen la validacion historica de la migracion; sus recuentos corresponden a esa etapa.
+
 Referencia Python: commit 78533283ac738ca82220da0bbf507d768a5800a9. El proyecto original se consulto en lectura y no se modifico.
 
 ## Equivalencia del parser

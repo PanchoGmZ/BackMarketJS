@@ -11,7 +11,7 @@ import { event, navigationFailure } from './diagnostics.js';
 import { ExtractionError } from './values.js';
 
 export async function runActor({ actor = Actor, budget = new Budget(), rawInput, offlineHtml,
-    acquireFn = acquire, proxyFn = configureProxy } = {}) {
+    acquireFn = acquire, httpAcquireFn, proxyFn = configureProxy } = {}) {
     const state = { source: 'backmarket', runtime: 'javascript', extractionMethod: 'nuxt',
         runId: randomUUID(), startedAt: new Date().toISOString(), status: 'running',
         stage: 'actor-init', savedResults: 0, extractionPerformed: false, timings: {}, error: null };
@@ -40,6 +40,8 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
         if (rawInput !== undefined) await actor.setValue(process.env.ACTOR_INPUT_KEY || 'INPUT', rawInput);
         input = parseInput(await bounded(actor.getInput(), budget.remaining(), null, 'input'));
         budget.configure(input);
+        state.transport = input.transport;
+        event('TRANSPORTE', { transport: input.transport });
         state.diagnosticMode = input.diagnosticMode;
         state.executionMode = offlineHtml === undefined ? 'live' : 'offline';
         state.timeBudget = { processSeconds: budget.total / 1000, acquisitionSeconds: budget.acquisition / 1000, workSeconds: budget.work / 1000 };
@@ -56,7 +58,14 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
             event('PROXY', { enabled: settings.enabled, mode: settings.mode, groups: settings.groups,
                 country: settings.country, status: state.proxy.status, connected: null });
             state.stage = 'acquisition';
-            const result = await timed('acquisition', () => acquireFn(input, { proxy, proxyMode: settings.mode, budget, signal: controller.signal }));
+            const acquireTransport = input.transport === 'undici'
+                ? httpAcquireFn ?? (await import('./http_undici.js')).acquire : acquireFn;
+            let result;
+            try {
+                result = await timed('acquisition', () => acquireTransport(input, { proxy, proxyMode: settings.mode, budget, signal: controller.signal }));
+            } finally {
+                event('TIEMPO_ADQUISICION', { transport: input.transport, seconds: state.timings.acquisition });
+            }
             html = result.html; responses = result.responses; state.acquisition = result.acquisition;
             const document = state.acquisition.requests?.filter(r => r.category === 'document').at(-1);
             state.proxy.connected = document ? document.httpStatus !== 407 : null;
@@ -141,6 +150,7 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
         state.finishedAt = new Date().toISOString(); state.elapsedSeconds = budget.elapsed() / 1000;
         state.timings.totalWork = (performance.now() - start) / 1000; state.logicalExitCode = exitCode;
         metadata.status = state.status; metadata.executionMode = state.executionMode ?? null;
+        metadata.transport = state.transport ?? null;
         metadata.extractionPerformed = state.extractionPerformed;
         if (initialized) {
             try {
@@ -148,7 +158,7 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
                 await bounded(actor.setValue('RUN_STATE', state), Math.max(1, budget.remaining(budget.total) - 1000), null, 'state-save');
             } catch { event('DIAGNOSTICO', { code: 'PERSISTENCE_FAILED' }, 'warning'); exitCode = 1; }
         }
-        event('FIN', { status: state.status, savedResults: state.savedResults, seconds: state.elapsedSeconds, code: state.error?.code ?? null });
+        event('FIN', { transport: state.transport ?? null, status: state.status, savedResults: state.savedResults, seconds: state.elapsedSeconds, code: state.error?.code ?? null });
         completed();
         try {
             if (initialized) await bounded(actor.exit({ exit: false, exitCode, timeoutSecs: 1 }), Math.max(1, budget.remaining(budget.total)), null, 'sdk-close');

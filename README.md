@@ -1,6 +1,6 @@
 # Back Market URL Extractor - JavaScript
 
-Version independiente del Actor Python de TU CUMPA. Node.js 22+ (Docker Node 24), Apify SDK, Playwright y Cheerio. Prioriza el parser Nuxt que produjo resultados en Python. No necesita Python, Crawl4AI, LLM ni servicios de IA.
+Version independiente del Actor Python de TU CUMPA. Node.js 22+ (Docker Node 24), Apify SDK, Playwright, Undici y Cheerio. Dos transportes seleccionables comparten el parser Nuxt que produjo resultados en Python. No necesita Python, Crawl4AI, LLM ni servicios de IA.
 
 ## Estado comprobado
 
@@ -9,7 +9,7 @@ Version independiente del Actor Python de TU CUMPA. Node.js 22+ (Docker Node 24)
 - El usuario ha confirmado extracciones reales de telefonos en Apify Cloud. La ampliacion de URLs cortas se valida offline; las pruebas de transporte utilizan dobles de Playwright, sin sockets.
 - Dockerfile preparado; Docker Desktop esta instalado pero el motor Linux no esta disponible. La imagen no se ha construido.
 
-El Actor Python original y su repositorio permanecen intactos. Esta carpeta debe publicarse, si se desea, en OTRO repositorio y en OTRO Actor.
+El Actor Python original y su repositorio permanecen intactos. Los transportes Chromium y Undici pertenecen a este mismo BackMarketJS y al mismo Actor existente.
 
 ## Entrada
 
@@ -23,6 +23,7 @@ Sin identidad u oferta verificables se devuelve `SHORT_URL_IDENTITY_UNVERIFIED`,
 
     {
       "url": "PEGA_AQUI_UNA_URL_COMPATIBLE",
+      "transport": "chromium",
       "outputFormat": "reference1688",
       "diagnosticMode": false,
       "diagnosticTimeoutSeconds": 180,
@@ -32,6 +33,24 @@ Sin identidad u oferta verificables se devuelve `SHORT_URL_IDENTITY_UNVERIFIED`,
     }
 
 Los identificadores de prueba solo aparecen en fixtures y pruebas. El extractor obtiene el UUID dinamicamente de la URL o de las evidencias comerciales verificadas de una ficha corta.
+
+En Apify, el selector **Transporte de adquisicion** ofrece `chromium` y `undici`. Si falta `transport`, se utiliza `chromium`, con el comportamiento anterior. `extractionMethod` sigue siendo `nuxt` en estado y metadata; no se reutiliza para elegir transporte. No hay fallback automatico.
+
+Input concreto para una prueba manual Undici en el Actor existente (la oferta/precio actual puede cambiar):
+
+```json
+{
+  "url": "https://www.backmarket.com/en-us/p/iphone-15-plus-128-gb-yellow-unlocked/eda80a12-a40b-4faa-b0f6-438bea90f1e5?l=12&offerType=0",
+  "transport": "undici",
+  "outputFormat": "reference1688",
+  "diagnosticMode": true,
+  "diagnosticTimeoutSeconds": 180,
+  "proxyConfiguration": { "useApifyProxy": true, "apifyProxyGroups": ["UNBLOCKER"] },
+  "proxyAccessAuthorized": true
+}
+```
+
+El usuario ejecutara las pruebas Cloud; no se han solicitado fichas reales con este modulo. El formulario nuevo requiere construir la version actualizada del mismo Actor desde `origin/main`. No hay que crear otro Actor. Para comparar, utiliza la misma URL/seleccion y cambia solo `transport`; configura un timeout externo de 180 s en este ejemplo.
 
 ## Ejecucion local con F5
 
@@ -71,7 +90,13 @@ No se guardan HTML completo, configuracion de pagos, cookies, perfiles ni creden
 
 ## Adquisicion, red y TLS
 
-Una sola page.goto() con domcontentloaded, sin networkidle, reintentos, navegaciones adicionales ni peticiones directas a endpoints. Los eventos HTTP se registran antes de navegar. Se aprovecha HTML Nuxt completo temprano y JSON comercial que la pagina haya solicitado normalmente.
+Con `chromium`: una sola page.goto() con domcontentloaded, sin networkidle, reintentos, navegaciones adicionales ni peticiones directas a endpoints. Los eventos HTTP se registran antes de navegar. Se aprovecha HTML Nuxt completo temprano y JSON comercial que la pagina haya solicitado normalmente. `src/browser.js` permanece intacto.
+
+Con `undici`: `src/http_undici.js` recibe la URL completa y hace una llamada fetch con dispatcher propio (Agent en directo o ProxyAgent con las credenciales oficiales del SDK). Conserva `l`/`offerType`, usa HTTP/1.1 y `Accept: text/html`, no sigue redirecciones y no hace peticiones a APIs. Un 3xx se rechaza; las URLs cortas que necesiten redireccionar pueden no funcionar en esta primera version. No hay navegador, hidratacion, cookies de navegacion ni JSON generado por JS. El HTML recibido pasa al mismo `extractHtml`, verificaciones y Dataset. `disableHttp2` solo afecta a Chromium.
+
+Undici aplica el limite de bytes al stream decodificado, incluso si el HTML esta comprimido. Su timeout cubre headers y cuerpo, respeta el presupuesto global y `timeoutSeconds`, y reserva dos segundos para cancelar/cerrar recursos. Cierra el dispatcher, con destroy acotado si falla el cierre normal. Registra HTTP 403/429 y fallos de TLS, DNS, TCP, CONNECT y timeout con codigos seguros; nunca imprime errores brutos. Undici fetch puede ocultar los detalles de un HTTP 407 del destino: sin evidencia se conserva NETWORK_ERROR; un 407 observado o de CONNECT se identifica como PROXY_AUTH_ERROR. `httpRequestCount` cuenta llamadas de la aplicacion, no reinicios internos del cliente o del proveedor.
+
+**Limitacion comercial pendiente:** preservar la URL no demuestra que el servidor haya aplicado `l`/`offerType`. El parser existente conserva su verificacion de coherencia comercial, incluida la limitacion auditada de las URLs largas con oferta sin productId y cero opciones seleccionadas. No se ha reforzado ni relajado el parser en este cambio. No se debe dar por confirmada la equivalencia HTTP hasta contrastar fichas, ofertas y variantes reales con la version estable. Si faltan identidad u oferta verificables, no hay datos inventados ni fallback.
 
 Documento principal o fuente comercial con 401/403 o desafio explicito: parada. HTTP 502 del documento: error de adquisicion. Reseñas 403: error opcional, sin descartar el producto. /testchallengepage: ACCESS_CHALLENGE. No se implementa resolucion de desafios, cambio de identidad ni rotacion de IP ante una denegacion.
 
@@ -82,7 +107,7 @@ UNBLOCKER queda seleccionado por defecto, tanto en el formulario como cuando fal
 - configured solo acredita la configuracion del SDK. connected requiere una respuesta HTTP observada del documento; HTTP 200 no acredita por si solo una extraccion valida.
 - Los servicios pueden generar cargos; el tiempo y la memoria NO constituyen un presupuesto monetario. No se activan automaticamente.
 
-TLS se verifica en conexion directa y Residential (`ignoreHTTPSErrors=false`). Solo con UNBLOCKER se establece `ignoreHTTPSErrors=true` en el contexto real de Playwright y se registra `[TLS] verified=false`; es una excepcion temporal de diagnostico para observar la respuesta posterior al error de CA. En ese modo Chromium no valida la identidad HTTPS del servidor. No es seguro para produccion ni debe considerarse una solucion de confianza TLS. No se modifica la verificacion TLS de los otros modos.
+TLS se verifica en conexion directa y Residential. En Chromium sigue intacta la excepcion `ignoreHTTPSErrors=true` solo para UNBLOCKER. En Undici solo con proxy UNBLOCKER se aplica `requestTls.rejectUnauthorized=false` al dispatcher propio; `proxyTls` conserva su configuracion predeterminada. No se usa `NODE_TLS_REJECT_UNAUTHORIZED` ni se cambia TLS global. `[TLS] verified=false` indica que no se valida la identidad HTTPS del destino; es una excepcion temporal de diagnostico, no una solucion de confianza TLS para produccion.
 
 `ERR_TOO_MANY_RETRIES` conserva causa subyacente `undetermined`. La [definicion de Chromium](https://chromium.googlesource.com/chromium/src/+/main/net/base/net_error_list.h) contempla reintentos internos por autenticacion o certificados y posibles fallos de su pila de red; el codigo solo no demuestra bloqueo de IP ni identifica cual ocurrio. No se agregan reintentos del Actor. En `RUN_STATE.acquisition.navigationError` se guardan categoria, origen, duracion, respuestas HTTP del documento y senales de `requestfailed`. `[PROXY_TRANSPORTE]` registra solo presencia de los campos de autenticacion, nunca sus valores; no acredita autenticacion exitosa. Compara esos datos y el build/input entre runs correctos y fallidos.
 
@@ -99,7 +124,7 @@ BACKMARKET_TIMEOUT_SECONDS permite reducir adquisicion normal (5..48). BACKMARKE
 
 En Linux con cgroups se observa memoria del contenedor. Fuera de cgroups se registra solo RSS de Node, no el total de Chromium; el limite de memoria del run de Apify sigue siendo necesario. Los timers Node no interrumpen codigo sincronico bloqueado; tamanos/grafos estan acotados y el timeout externo es la salvaguarda final. No se ha medido latencia Cloud ni garantizado el limite externo de 60 s con arranque frio.
 
-Logs: INICIO, LIMITES, PROXY, TLS, HTTP, CUERPO, REDIRECCION, CAUSA_NAVEGACION, HTML_LISTO, DOCUMENTO_PRODUCTO, PRECIO_VERIFICADO, PESO, DATOS_FALTANTES, GUARDADO y FIN. RUN_STATE conserva etapas, HTTP, CF-Ray disponible, tiempos, estado y numero de resultados. Ninguna excepcion bruta se imprime.
+Logs: INICIO, TRANSPORTE, LIMITES, PROXY, TLS, HTTP, CUERPO, REDIRECCION, CAUSA_NAVEGACION, HTML_LISTO, TIEMPO_ADQUISICION, DOCUMENTO_PRODUCTO, PRECIO_VERIFICADO, PESO, DATOS_FALTANTES, GUARDADO y FIN. RUN_STATE y PRODUCT_METADATA registran `transport` por separado de `extractionMethod`. `TIEMPO_ADQUISICION.seconds` y `RUN_STATE.timings.acquisition` incluyen adquisicion y cierre del transporte; `FIN.seconds` conserva la duracion total observada hasta la finalizacion del trabajo. RUN_STATE conserva etapas, HTTP, CF-Ray disponible, tiempos, estado y numero de resultados. Ninguna excepcion bruta se imprime.
 
 ## Validacion
 
@@ -111,22 +136,22 @@ Logs: INICIO, LIMITES, PROXY, TLS, HTTP, CUERPO, REDIRECCION, CAUSA_NAVEGACION, 
 
 Las pruebas no hacen scraping, no lanzan navegador real y no consumen proxy. Incluyen equivalencia autentica, serializacion Nuxt sintetica de esos mismos datos, precios/IDs, pesos, privacidad, proxy/sesiones, HTTP, contrato y ciclo SDK simulado. La comprobacion offline real del SDK usa almacenamiento nuevo separado. No convierte una captura en prueba de acceso actual.
 
-## Crear un Actor JavaScript separado en Apify
+## Probar los dos transportes en el Actor existente
 
-1. Publica SOLO esta carpeta en un repositorio nuevo, revisando las exclusiones. No sobrescribas el repositorio Python.
-2. En Apify Console crea otro Actor, por ejemplo backmarket-url-extractor-js, fuente Git y rama del repositorio nuevo.
-3. Construye con este Dockerfile y Node 24. El build instala Chromium con sus bibliotecas de sistema.
-4. Primera prueba manual autorizada: memoria 2048 MB, diagnosticMode=true y timeout de run 180 s. Mantener proxy desactivado salvo configuracion y permisos explicitos.
-5. Compara el JSON y PRODUCT_METADATA con la version Python usando el MISMO producto/seleccion y datos contemporaneos. Los precios pueden cambiar.
-6. Solo tras validar navegacion, dos productos, TLS, precios/pesos y presupuestos, considera sustituir la integracion. El Actor Python sigue siendo la referencia.
+1. Usa el mismo repositorio BackMarketJS, rama `main`, y el mismo Actor JavaScript ya configurado en Apify.
+2. Construye la nueva version cuando quieras probarla; no se han cambiado ajustes de la cuenta ni desplegado desde esta integracion.
+3. Conserva el Dockerfile actual y Chromium instalado para el transporte predeterminado.
+4. Prueba manualmente `transport: "undici"`, diagnosticMode=true y timeout externo 180 s, con proxy autorizado como en el ejemplo.
+5. Compara contra `transport: "chromium"` con el MISMO producto/seleccion y datos contemporaneos; los precios pueden cambiar. Revisa JSON y PRODUCT_METADATA, no solo HTTP 200.
+6. Antes de retirar Chromium, comprueba otras selecciones, variantes, URLs cortas y latencia real. La referencia Git previa es `stable/chromium-before-undici-20261110` (commit `2522391`).
 
-No se ha creado un Actor, desplegado, hecho login, commit ni push desde esta preparacion.
+No se ha creado otro Actor ni ejecutado scraping, pruebas Cloud o solicitudes pagadas durante esta integracion. Las pruebas Cloud quedan a cargo del usuario.
 
 ## Diferencias conocidas
 
 - Migracion inicial solo Nuxt, JSON incrustado y respuestas comerciales observadas. Los metodos Playwright DOM/Crawl4AI CSS no se han portado.
 - No hay pipeline Markdown ni Crawl4AI. Playwright entrega HTML/JSON y Cheerio inspecciona scripts.
-- TLS estricto tambien para Unblocker. Esto puede impedir el acceso que dependia del ignore inseguro del prototipo.
+- La excepcion temporal TLS de UNBLOCKER se conserva por transporte; no acredita confianza HTTPS.
 - JSON-LD aislado se diagnostica como parcial y no se guarda sin identidad comercial verificada.
 - Metricas de memoria y cierre usan APIs Node/cgroup; no son las mediciones privadas de psutil.
 - El caso iPhone 14 Plus necesita el payload de origen para comparar los once campos desde la misma entrada comercial. Su salida esperada se conserva sin inventar fuentes.

@@ -17,6 +17,8 @@ assert.equal(input.properties.proxyConfiguration.default.useApifyProxy,true);
 assert.deepEqual(input.properties.proxyConfiguration.default.apifyProxyGroups,['UNBLOCKER']);
 assert.equal(input.properties.diagnosticMode.default,false);
 assert.equal(input.properties.disableHttp2.default,false);
+assert.equal(input.properties.transport.default,'chromium');
+assert.deepEqual(input.properties.transport.enum,['chromium','undici']);
 const ajv=new Ajv({strict:false,allErrors:true});addFormats(ajv);
 ajv.compile(input); const dataset=json('.actor/dataset_schema.json');ajv.compile(dataset.fields);
 assert.equal(Object.keys(dataset.fields.properties).length,11);
