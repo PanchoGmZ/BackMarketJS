@@ -48,16 +48,25 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
     attemptNumber = 1, transport = 'chromium', proxyBridge = false } = {}) {
     const started = performance.now(), remaining = () => Math.min(budget.remaining(budget.acquisition), budget.remaining());
     const tlsVerified = proxyMode !== 'unblocker';
+    const fastMode = transport === 'firefox' && input.firefoxFastMode === true;
     const report = { status: 'running', navigationCount: 0, directApiRequests: 0, requests: [], redirects: [],
         resourceErrors: [], navigationFailures: [], browserClosed: false, stage: 'browser-start', tlsVerified,
         http2Disabled: transport === 'chromium' && input.disableHttp2 === true, attemptNumber,
-        ...(transport === 'chromium' ? {} : { transport }) };
+        ...(transport === 'chromium' ? {} : { transport }),
+        ...(transport === 'firefox' ? { fastMode, fastModeBlockedResources: { image: 0, font: 0, media: 0 }, timings: {
+            browserLaunchSeconds: null, contextSetupSeconds: null, pageSetupSeconds: null, routeSetupSeconds: null,
+            navigationWaitUntil: fastMode ? 'commit' : 'domcontentloaded', navigationStartedSeconds: null,
+            documentHeadersSeconds: null, documentBodyReadSeconds: null, navigationWaitSeconds: null,
+            domContentLoadedSeconds: null, pageContentSeconds: null, htmlPreparationSeconds: 0, browserCloseSeconds: null,
+        } } : {}) };
     report.proxyTransport = { mode: proxyMode, configured: Boolean(proxy),
         usernameProvided: proxyBridge ? false : Boolean(proxy?.username),
         passwordProvided: proxyBridge ? false : Boolean(proxy?.password),
         credentialBinding: proxyBridge ? 'proxy-chain-loopback' : proxy ? 'playwright-launch-fields' : 'none' };
     let browser, context, page, html = '', accepted = false, closing = false;
-    const responses = {}, tasks = new Set(), ready = deferred(), stopped = deferred(), deniedOptional = new Set();
+    const responses = {}, tasks = new Set(), ready = deferred(), stopped = deferred();
+    const mainDocumentRead = deferred();
+    let mainDocumentTask = null, deniedOptional = new Set(), navigationStarted = null;
     const origin = new URL(input.url).origin, base = '/product-page/products/' + input.productId;
     const paths = input.productId === null ? new Map()
         : new Map([[base, 'product'], [base + '/pickers', 'pickers'], [base + '/technical_specifications', 'specifications']]);
@@ -67,18 +76,24 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
         event('PARADA', { status, code, stage }, 'warning'); stopped.resolve();
     }
     function offerHtml(value, source, url, challengeChecked = false) {
-        if (report.error || accepted) return;
-        const doc = report.requests.filter(r => r.category === 'document').at(-1);
-        if (!doc || doc.httpStatus !== 200 || !doc.contentType.includes('text/html')) return;
-        if (typeof value !== 'string' || Buffer.byteLength(value) > input.maxHtmlBytes) { fail('partial', 'HTML_TOO_LARGE'); return; }
-        if (!challengeChecked && visibleChallenge(value)) { fail('blocked', 'ACCESS_CHALLENGE', 'html-validation'); return; }
-        html = value; accepted = true; report.htmlSource = source; report.finalUrl = safeUrl(url);
-        report.pageSelection = selectionState(input.url, url);
-        report.htmlReadySeconds = (performance.now() - started) / 1000;
-        event('HTML_LISTO', { bytes: Buffer.byteLength(value), source, commercialValidationPending: true });
-        ready.resolve();
+        const prepareStarted = report.timings ? performance.now() : null;
+        try {
+            if (report.error || accepted) return;
+            const doc = report.requests.filter(r => r.category === 'document').at(-1);
+            if (!doc || doc.httpStatus !== 200 || !doc.contentType.includes('text/html')) return;
+            if (typeof value !== 'string' || Buffer.byteLength(value) > input.maxHtmlBytes) { fail('partial', 'HTML_TOO_LARGE'); return; }
+            if (!challengeChecked && visibleChallenge(value)) { fail('blocked', 'ACCESS_CHALLENGE', 'html-validation'); return; }
+            html = value; accepted = true; report.htmlSource = source; report.finalUrl = safeUrl(url);
+            report.pageSelection = selectionState(input.url, url);
+            report.htmlReadySeconds = (performance.now() - started) / 1000;
+            event('HTML_LISTO', { bytes: Buffer.byteLength(value), source, commercialValidationPending: true });
+            ready.resolve();
+        } finally {
+            if (report.timings) report.timings.htmlPreparationSeconds += (performance.now() - prepareStarted) / 1000;
+        }
     }
     async function readResponse(response, item, kind) {
+        const bodyStarted = report.timings && item.category === 'document' ? performance.now() : null;
         item.bodyRead = { status: 'reading', bytes: null };
         try {
             if (Number(response.headers()['content-length']) > input.maxHtmlBytes) { fail('partial', 'RESPONSE_TOO_LARGE'); return; }
@@ -107,6 +122,9 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
             item.bodyRead = { ...item.bodyRead, status: 'failed', code: 'RESPONSE_READ_OR_VALIDATION_ERROR',
                 errorType: error?.name === 'SyntaxError' ? 'SyntaxError' : 'ResponseError' };
             event('LECTURA', { category: item.category, code: item.bodyRead.code, bytesRead: item.bodyRead.bytes }, 'warning');
+        } finally {
+            if (report.timings && item.category === 'document')
+                report.timings.documentBodyReadSeconds = (performance.now() - bodyStarted) / 1000;
         }
     }
     let monitor;
@@ -118,14 +136,31 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
         launch.then(b => { if (closing) b.close().catch(() => {}); }, () => {});
         browser = await bounded(launch, remaining() - 2000, signal, 'browser-start');
         report.browserStartupSeconds = (performance.now() - started) / 1000;
+        if (report.timings) report.timings.browserLaunchSeconds = report.browserStartupSeconds;
+        const contextStarted = performance.now();
         context = await bounded(browser.newContext({ ignoreHTTPSErrors: !tlsVerified }), remaining() - 2000, signal, 'context-start');
+        if (report.timings) report.timings.contextSetupSeconds = (performance.now() - contextStarted) / 1000;
         event('PROXY_TRANSPORTE', { ...(transport === 'chromium' ? {} : { transport }), ...report.proxyTransport,
             http2Disabled: report.http2Disabled });
         event('TLS', { ...(transport === 'chromium' ? {} : { transport }), verified: tlsVerified });
+        const pageStarted = performance.now();
         page = await context.newPage();
+        if (report.timings) report.timings.pageSetupSeconds = (performance.now() - pageStarted) / 1000;
+        if (report.timings) page.on('domcontentloaded', () => {
+            if (report.timings.domContentLoadedSeconds === null)
+                report.timings.domContentLoadedSeconds = (performance.now() - started) / 1000;
+        });
         // Bind events and routes before the only Page.goto().
+        const routeSetupStarted = performance.now();
         await page.route('**/*', async route => {
             const request = route.request(), url = new URL(request.url());
+            if (fastMode) {
+                const resourceType = request.resourceType();
+                if (Object.hasOwn(report.fastModeBlockedResources, resourceType)) {
+                    report.fastModeBlockedResources[resourceType]++;
+                    return route.abort();
+                }
+            }
             if (deniedOptional.has(url.origin + url.pathname)) return route.abort();
             if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
                 if (challengeUrl(request.url())) { fail('blocked', 'ACCESS_CHALLENGE', 'redirect'); return route.abort(); }
@@ -133,6 +168,7 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
             }
             return route.continue();
         });
+        if (report.timings) report.timings.routeSetupSeconds = (performance.now() - routeSetupStarted) / 1000;
         page.on('requestfailed', request => {
             if (closing || accepted || !request.isNavigationRequest() || request.frame() !== page.mainFrame()) return;
             let diagnosis = navigationFailure(request.failure()?.errorText, 'navigation', 'requestfailed');
@@ -152,6 +188,11 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
                 : url.origin === origin && /^\/reviews\/v1\/products\/[^/]+\/reviews\/?$/.test(url.pathname) ? 'optional'
                 : url.origin === origin && url.pathname.startsWith('/cdn-cgi/challenge-platform/') ? 'protection' : 'secondary';
             const status = response.status();
+            if (doc && report.timings && navigationStarted !== null) {
+                report.timings.documentHeadersSeconds = (performance.now() - navigationStarted) / 1000;
+                if (fastMode)
+                    report.timings.navigationWaitSeconds = report.timings.documentHeadersSeconds;
+            }
             if (report.firstHttpSeconds === undefined) report.firstHttpSeconds = (performance.now() - started) / 1000;
             const location = headers.location;
             if (location && [301,302,303,307,308].includes(status)) {
@@ -173,6 +214,7 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
                 ...(bridgeFailure ? { proxyBridgeFailure: bridgeFailure.category } : {}) };
             report.requests.push(item); event('HTTP', item);
             if (failure) {
+                if (doc) mainDocumentRead.resolve(null);
                 report.cfRay = item.cfRay;
                 if (bridgeFailure)
                     event('PROXY_BRIDGE', { status: 'error', code: bridgeFailure.code, category: bridgeFailure.category,
@@ -185,8 +227,11 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
                 event(category === 'optional' ? 'RECURSO_OPCIONAL' : 'RECURSO_SECUNDARIO', { status, category }, 'warning');
                 if (category === 'optional') deniedOptional.add(url.origin + url.pathname);
             }
+            if (doc && status !== 200 && ![301,302,303,307,308].includes(status)) mainDocumentRead.resolve(null);
             if (status === 200 && (doc || kind)) {
-                const task = readResponse(response, item, kind); tasks.add(task); task.finally(() => tasks.delete(task));
+                const task = readResponse(response, item, kind);
+                if (doc) { mainDocumentTask = task; mainDocumentRead.resolve(task); }
+                tasks.add(task); task.finally(() => tasks.delete(task));
             }
         });
         monitor = setInterval(() => { memoryObservation().then(observation => {
@@ -194,11 +239,28 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
             if (observation.mb > input.maxMemoryMb) fail('partial', 'MEMORY_LIMIT', 'resources');
         }).catch(() => {}); }, 1000);
         report.stage = 'navigation'; report.navigationCount = 1;
-        event('NAVEGACION', { ...(transport === 'chromium' ? {} : { transport }), count: 1, max: 1, waitUntil: 'domcontentloaded', retries: 0 });
-        const navigationStarted = performance.now();
-        const navigation = page.goto(input.url, { waitUntil: 'domcontentloaded', timeout: Math.max(1, remaining() - 2000) })
+        const waitUntil = fastMode ? 'commit' : 'domcontentloaded';
+        event('NAVEGACION', { ...(transport === 'chromium' ? {} : { transport }), count: 1, max: 1, waitUntil, retries: 0 });
+        navigationStarted = performance.now();
+        if (report.timings) report.timings.navigationStartedSeconds = (navigationStarted - started) / 1000;
+        const navigation = page.goto(input.url, { waitUntil, timeout: Math.max(1, remaining() - 2000) })
             .then(async () => {
+                if (report.timings) report.timings.navigationWaitSeconds = (performance.now() - navigationStarted) / 1000;
                 if (report.error || accepted) return;
+                if (fastMode) {
+                    const documentTask = await bounded(Promise.race([
+                        mainDocumentRead.promise,
+                        stopped.promise.then(() => null),
+                    ]), remaining() - 2000, signal, 'document-response');
+                    if (report.error) return;
+                    if (documentTask) await bounded(documentTask, remaining() - 2000, signal, 'document-body');
+                    if (report.error || accepted) return;
+                    const contentStarted = performance.now();
+                    const document = await page.content();
+                    if (report.timings) report.timings.pageContentSeconds = (performance.now() - contentStarted) / 1000;
+                    offerHtml(document, 'rendered-dom-fast', page.url());
+                    return;
+                }
                 const document = await page.content();
                 offerHtml(document, 'rendered-dom', page.url());
             }).catch(error => {
@@ -233,6 +295,7 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
         const startClose = performance.now();
         if (browser) try { await bounded(browser.close(), 2000, null, 'browser-close'); report.browserClosed = true; } catch { report.closeError = 'BROWSER_CLOSE_TIMEOUT'; }
         report.closeSeconds = (performance.now() - startClose) / 1000;
+        if (report.timings) report.timings.browserCloseSeconds = report.closeSeconds;
         report.seconds = (performance.now() - started) / 1000;
         if (html && report.status !== 'received') report.candidateBeforeAccessFailure = true;
         event('ADQUISICION_INTENTO', { attempt: attemptNumber, status: report.status, seconds: report.seconds,

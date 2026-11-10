@@ -21,7 +21,7 @@ const partialId = '393000c0-1f19-43fc-9f89-e6faf3f3bd46';
 const partialHtml = readFileSync(new URL('./fixtures/reference/' + partialId + '/commercial.html',import.meta.url),'utf8');
 const partialExpected = JSON.parse(readFileSync(new URL('./fixtures/reference/' + partialId + '/python-output.json',import.meta.url),'utf8'));
 class FakeActor {
-    constructor(input = {url:expected.url,proxyConfiguration:{useApifyProxy:false}}) { this.input=input; this.values={}; this.records=[]; this.offline=[]; this.listeners={}; this.exits=[]; }
+    constructor(input = {url:expected.url,proxyConfiguration:{useApifyProxy:false}}) { this.input={transport:'chromium',...input}; this.values={}; this.records=[]; this.offline=[]; this.listeners={}; this.exits=[]; }
     async init() {}
     async getInput() { return this.input; }
     async setValue(k,v) { this.values[k]=structuredClone(v); if(k==='INPUT')this.input=v; }
@@ -200,14 +200,14 @@ async function browserFixture(status,{optional=false,proxyMode='direct',proxy=nu
     budget.stop();return{result,calls,contextOptions,launchOptions};
 }
 function browserSequence(outcomes,{productUrl=expected.url,documentHtml=html}={}) {
-    const stats={launches:0,navigations:0,closes:0,active:false,urls:[],gotoOptions:[],launchOptions:[],contextOptions:[],trace:[]};
+    const stats={launches:0,navigations:0,closes:0,active:false,urls:[],gotoOptions:[],launchOptions:[],contextOptions:[],trace:[],routeHandler:null,contentCalls:0};
     const browserType={launch:async options=>{
         assert.equal(stats.active,false,'a new browser must not launch before the previous one closes');
         const attempt=stats.launches++;
         assert.ok(attempt<outcomes.length,'unexpected browser launch');
         stats.active=true;stats.launchOptions.push(structuredClone(options));stats.trace.push('launch:'+attempt);
         const page=new EventEmitter();
-        page.route=async()=>{};page.mainFrame=()=>page;page.url=()=>productUrl;page.content=async()=>documentHtml;
+        page.route=async(_pattern,handler)=>{stats.routeHandler=handler;};page.mainFrame=()=>page;page.url=()=>productUrl;page.content=async()=>{stats.contentCalls++;return documentHtml;};
         const request=()=>({isNavigationRequest:()=>true,frame:()=>page});
         page.goto=async (url,options)=>{
             stats.navigations++;stats.urls.push(url);stats.trace.push('goto:'+attempt);
@@ -272,6 +272,7 @@ test('Firefox proxy-chain transport shares Nuxt parser and preserves the 1688 ou
     assert.equal(result.state.proxy.connected,true);
     assert.equal(report.navigationCount,1);assert.equal(report.requests[0].httpStatus,200);
     assert.equal(report.tlsVerified,false);assert.equal(report.http2Disabled,false);
+    assert.equal(report.timings.navigationWaitUntil,'domcontentloaded');
     assert.deepEqual(stats.urls,[expected.url]);assert.equal(stats.navigations,1);
     assert.equal(stats.closes,1);assert.equal(stats.active,false);
     assert.deepEqual(stats.launchOptions[0].proxy,{server:'http://127.0.0.1:43127'});
@@ -289,6 +290,39 @@ test('Firefox proxy-chain transport shares Nuxt parser and preserves the 1688 ou
     assert.deepEqual(stats.trace,['launch:0','goto:0','close:0']);
     assert.deepEqual(actor.records,[expected]);assert.equal(Object.keys(actor.records[0]).length,11);
     assert.equal(JSON.stringify(result.state).includes('PRIVATE'),false);
+});
+test('Firefox fast mode commits, reads the complete document, keeps parser output, and skips DOMContentLoaded',async()=>{
+    const input=parseInput({url:expected.url,transport:'firefox',firefoxFastMode:true});
+    const {browserType,stats}=browserSequence([200]);
+    const result=await acquireFirefox(input,{budget:{acquisition:48000,remaining:()=>48000},browserType});
+    assert.equal(result.acquisition.status,'received');
+    assert.equal(result.acquisition.fastMode,true);
+    assert.equal(stats.gotoOptions[0].waitUntil,'commit');
+    assert.equal(stats.navigations,1);assert.equal(stats.closes,1);
+    assert.equal(result.html,html);assert.equal(result.acquisition.htmlSource,'navigation-response');
+    assert.equal(result.acquisition.timings.domContentLoadedSeconds,null);
+    assert.ok(result.acquisition.timings.documentHeadersSeconds>=0);
+    assert.ok(result.acquisition.timings.documentBodyReadSeconds>=0);
+    assert.ok(result.acquisition.timings.navigationWaitSeconds>=0);
+    const parsed=extractHtml(result.html,input,result.responses);
+    assert.deepEqual(parsed.output,expected);assert.equal(Object.keys(parsed.output).length,11);
+});
+test('Firefox fast mode blocks only image, font, and media resources; scripts and API requests continue',async()=>{
+    const input=parseInput({url:expected.url,transport:'firefox',firefoxFastMode:true});
+    const {browserType,stats}=browserSequence([200]);
+    const result=await acquireFirefox(input,{budget:{acquisition:48000,remaining:()=>48000},browserType});
+    const outcomes=[];
+    for (const type of ['image','font','media','script','xhr','fetch']) {
+        const outcome={type,action:null};
+        await stats.routeHandler({request:()=>({url:()=>`https://www.backmarket.com/resource/${type}`,resourceType:()=>type,isNavigationRequest:()=>false}),
+            abort:async()=>{outcome.action='abort';},continue:async()=>{outcome.action='continue';}});
+        outcomes.push(outcome);
+    }
+    assert.deepEqual(outcomes,[
+        {type:'image',action:'abort'},{type:'font',action:'abort'},{type:'media',action:'abort'},
+        {type:'script',action:'continue'},{type:'xhr',action:'continue'},{type:'fetch',action:'continue'},
+    ]);
+    assert.deepEqual(result.acquisition.fastModeBlockedResources,{image:1,font:1,media:1});
 });
 test('Firefox maps proxy-chain upstream 407 to authentication rejection and always closes browser then bridge',async()=>{
     const input=parseInput({url:expected.url,transport:'firefox'});

@@ -7,6 +7,7 @@ Version independiente del Actor Python de TU CUMPA. Node.js 22+ (Docker Node 24)
 - Comparacion offline exacta de los once campos con las capturas comerciales autenticas y las salidas Python guardadas del iPhone 15 Plus (413 USD) e iPhone 14 Pro (379 USD).
 - El JSON Python del iPhone 14 Plus (299 USD, 6 imagenes, 27 caracteristicas, 4 grupos y 15 opciones) fue facilitado por el usuario. Se valida su contrato y peso de 7 oz. Falta su HTML/Nuxt o respuestas originales para repetir su transformacion desde los mismos datos.
 - El usuario ha confirmado extracciones reales de telefonos en Apify Cloud. La ampliacion de URLs cortas se valida offline; las pruebas de transporte utilizan dobles de Playwright, sin sockets.
+- Firefox normal con proxy-chain + UNBLOCKER queda confirmado por el usuario en dos fichas Cloud: un iPhone 14 con `success` y once campos, y un iPhone 12 Pro Max con `partial` por datos secundarios de variantes. El modo rápido nuevo sigue pendiente de comparación real.
 - Dockerfile preparado; Docker Desktop esta instalado pero el motor Linux no esta disponible. La imagen no se ha construido.
 
 El Actor Python original y su repositorio permanecen intactos. Chromium, Firefox y Undici pertenecen a este mismo BackMarketJS y al mismo Actor existente.
@@ -23,7 +24,8 @@ Sin identidad u oferta verificables se devuelve `SHORT_URL_IDENTITY_UNVERIFIED`,
 
     {
       "url": "PEGA_AQUI_UNA_URL_COMPATIBLE",
-      "transport": "chromium",
+      "transport": "firefox",
+      "firefoxFastMode": false,
       "outputFormat": "reference1688",
       "diagnosticMode": false,
       "diagnosticTimeoutSeconds": 180,
@@ -34,7 +36,7 @@ Sin identidad u oferta verificables se devuelve `SHORT_URL_IDENTITY_UNVERIFIED`,
 
 Los identificadores de prueba solo aparecen en fixtures y pruebas. El extractor obtiene el UUID dinamicamente de la URL o de las evidencias comerciales verificadas de una ficha corta.
 
-En Apify, el selector **Transporte de adquisicion** ofrece `chromium`, `firefox` y `undici`. Si falta `transport`, se utiliza `chromium`, con su comportamiento anterior. Firefox hace una navegacion Playwright sin reintentos y comparte la adquisicion de documento, el parser y las validaciones; su ejecucion real en Back Market queda pendiente de Cloud. `extractionMethod` sigue siendo `nuxt` en estado y metadata; no se reutiliza para elegir transporte. No hay fallback automatico.
+En Apify, el selector **Transporte de adquisicion** ofrece `firefox`, `chromium` y `undici`. Si falta `transport`, se utiliza Firefox en modo normal; Chromium sigue disponible seleccionándolo explícitamente y Undici continúa experimental. Firefox usa Playwright + proxy-chain y comparte la adquisición de documento, el parser y las validaciones. Sus fichas reales en Cloud fueron confirmadas por el usuario. `firefoxFastMode` está desactivado por defecto; al activarlo, Firefox navega con `waitUntil: "commit"` y bloquea solo imágenes, fuentes y multimedia del navegador. Los scripts y las solicitudes XHR/fetch siguen activos. `extractionMethod` sigue siendo `nuxt` en estado y metadata; no se reutiliza para elegir transporte. No hay fallback automático.
 
 Input concreto para una prueba manual Undici en el Actor existente (la oferta/precio actual puede cambiar):
 
@@ -52,7 +54,7 @@ Input concreto para una prueba manual Undici en el Actor existente (la oferta/pr
 
 El usuario ejecutara las pruebas Cloud; no se han solicitado fichas reales con este modulo. El formulario nuevo requiere construir la version actualizada del mismo Actor desde `origin/main`. No hay que crear otro Actor. Para comparar, utiliza la misma URL/seleccion y cambia solo `transport`; configura un timeout externo de 180 s en este ejemplo.
 
-Firefox se instala junto con Chromium en Docker con `npx playwright install --with-deps chromium firefox`. `package-lock.json` fija Playwright 1.64.1 y Firefox revision 1555 (Firefox 157.0). La dependencia `proxy-chain` 3.0.1 admite Node 20.11+ y se instala en la imagen mediante `npm ci`. Para Firefox, `anonymizeProxy()` conserva el proxy autenticado del SDK como upstream y devuelve un proxy HTTP local en `127.0.0.1`; Firefox recibe solo esa dirección sin credenciales. proxy-chain gestiona autenticación Basic upstream y túneles HTTPS CONNECT. Las pruebas offline verifican loopback, cierre, opciones y clasificación; no verifican acceso real a UNBLOCKER. Firefox mantiene `ignoreHTTPSErrors` limitado al contexto actual para UNBLOCKER. El transporte no se considera validado en Back Market hasta la prueba manual Cloud.
+Firefox se instala junto con Chromium en Docker con `npx playwright install --with-deps chromium firefox`. `package-lock.json` fija Playwright 1.64.1 y Firefox revision 1555 (Firefox 157.0). La dependencia `proxy-chain` 3.0.1 admite Node 20.11+ y se instala en la imagen mediante `npm ci`. Para Firefox, `anonymizeProxy()` conserva el proxy autenticado del SDK como upstream y devuelve un proxy HTTP local en `127.0.0.1`; Firefox recibe solo esa dirección sin credenciales. proxy-chain gestiona autenticación Basic upstream y túneles HTTPS CONNECT. Las pruebas offline verifican loopback, cierre, opciones y clasificación. Firefox mantiene `ignoreHTTPSErrors` limitado al contexto actual para UNBLOCKER.
 
 Input para probar Firefox en el mismo Actor:
 
@@ -60,12 +62,15 @@ Input para probar Firefox en el mismo Actor:
 {
   "url": "https://www.backmarket.com/en-us/p/iphone-14-128-gb-midnight-att/ec6b3e5e-676e-40f9-91a6-1c9d8537209b?l=12",
   "transport": "firefox",
+  "firefoxFastMode": false,
   "diagnosticMode": true,
   "diagnosticTimeoutSeconds": 180,
   "proxyConfiguration": { "useApifyProxy": true, "apifyProxyGroups": ["UNBLOCKER"] },
   "proxyAccessAuthorized": true
 }
 ```
+
+Para comparar el modo rápido, cambia solo `firefoxFastMode` a `true`; usa la misma URL, selección, proxy autorizado y presupuesto de diagnóstico. Compara identidad, precio, imágenes, variantes, contrato del Dataset y `FIREFOX_TIMING` con una ejecución normal contemporánea. El modo rápido no está validado en Cloud.
 
 ## Ejecucion local con F5
 
@@ -155,13 +160,13 @@ Las pruebas no hacen scraping, no lanzan navegador real y no consumen proxy. Inc
 
 1. Usa el mismo repositorio BackMarketJS, rama `main`, y el mismo Actor JavaScript ya configurado en Apify.
 2. Construye la nueva version cuando quieras probarla; no se han cambiado ajustes de la cuenta ni desplegado desde esta integracion.
-3. Conserva el Dockerfile actual y Chromium instalado para el transporte predeterminado.
-4. Prueba manualmente `transport: "firefox"` con proxy autorizado, diagnosticMode=true y timeout externo 180 s.
+3. Conserva ambos navegadores instalados; Firefox normal es ahora el transporte predeterminado y Chromium sigue disponible.
+4. Compara `transport: "firefox"` primero con `firefoxFastMode: false` y luego `true`, con proxy autorizado, diagnosticMode=true y timeout externo 180 s.
 5. Compara contra `transport: "chromium"` con el MISMO producto/seleccion y datos contemporaneos; los precios pueden cambiar. Revisa JSON y PRODUCT_METADATA, no solo HTTP 200.
 6. Usa `transport: "undici"` como metodo experimental independiente.
-7. Antes de retirar un motor, comprueba otras selecciones, variantes, URLs cortas y latencia real. La referencia Git previa a Firefox es `stable/pre-firefox-20261110`.
+7. Antes de retirar un motor, comprueba otras selecciones, variantes, URLs cortas y latencia real. La referencia Git de Firefox normal validado es `stable/firefox-proxy-chain-cloud-20261110`.
 
-No se ha creado otro Actor ni ejecutado scraping, pruebas Cloud o solicitudes pagadas durante esta integracion. Las pruebas Cloud quedan a cargo del usuario.
+No se ha creado otro Actor ni ejecutado scraping, pruebas Cloud o solicitudes pagadas durante esta optimización. La confirmación de Firefox normal corresponde a las ejecuciones Cloud informadas por el usuario; las pruebas de modo rápido quedan a su cargo.
 
 ## Diferencias conocidas
 
@@ -171,4 +176,4 @@ No se ha creado otro Actor ni ejecutado scraping, pruebas Cloud o solicitudes pa
 - JSON-LD aislado se diagnostica como parcial y no se guarda sin identidad comercial verificada.
 - Metricas de memoria y cierre usan APIs Node/cgroup; no son las mediciones privadas de psutil.
 - El caso iPhone 14 Plus necesita el payload de origen para comparar los once campos desde la misma entrada comercial. Su salida esperada se conserva sin inventar fuentes.
-- Build Docker y extraccion real Node en Cloud pendientes.
+- Build Docker real y comparación de latencia/contenido del modo rápido pendientes.

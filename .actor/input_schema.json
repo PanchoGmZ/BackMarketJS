@@ -17,11 +17,17 @@
     "transport": {
       "title": "Transporte de adquisicion",
       "type": "string",
-      "description": "Chromium conserva la adquisicion actual. Firefox usa Playwright con una navegacion y el mismo parser Nuxt. Undici obtiene HTML por HTTP sin navegador; experimental. Firefox y Undici pendientes de validar fichas reales en Cloud. Sin fallback automatico.",
+      "description": "Firefox es el transporte predeterminado tras validarse en Apify Cloud. Chromium conserva su ruta seleccionable. Undici obtiene HTML por HTTP sin navegador y sigue experimental. Sin fallback automatico.",
       "editor": "select",
       "enum": ["chromium", "firefox", "undici"],
-      "enumTitles": ["Chromium (actual)", "Firefox (experimental)", "Undici HTTP (experimental)"],
-      "default": "chromium"
+      "enumTitles": ["Chromium", "Firefox (validado en Cloud)", "Undici HTTP (experimental)"],
+      "default": "firefox"
+    },
+    "firefoxFastMode": {
+      "title": "Experimental: Firefox rápido",
+      "type": "boolean",
+      "description": "Solo para transport: firefox. Usa waitUntil commit, procesa el cuerpo HTML completo y bloquea imágenes, fuentes y multimedia del navegador. Scripts y solicitudes XHR/fetch siguen activos. Desactivado por defecto; puede devolver partial/error si la página no aporta evidencia comercial suficiente.",
+      "default": false
     },
     "outputFormat": {
       "title": "Formato de salida",

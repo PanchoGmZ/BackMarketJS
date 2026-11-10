@@ -155,6 +155,32 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
         clearTimeout(workTimer);
         state.finishedAt = new Date().toISOString(); state.elapsedSeconds = budget.elapsed() / 1000;
         state.timings.totalWork = (performance.now() - start) / 1000; state.logicalExitCode = exitCode;
+        if (state.transport === 'firefox') {
+            const acquisition = state.acquisition ?? {}, acquisitionTimings = acquisition.timings ?? {};
+            event('FIREFOX_TIMING', {
+                mode: input?.firefoxFastMode ? 'fast' : 'normal',
+                proxySetupSeconds: state.timings.proxySetup ?? null,
+                proxyBridgeSetupSeconds: acquisition.proxyBridge?.setupSeconds ?? null,
+                browserLaunchSeconds: acquisitionTimings.browserLaunchSeconds ?? acquisition.browserStartupSeconds ?? null,
+                contextSetupSeconds: acquisitionTimings.contextSetupSeconds ?? null,
+                pageSetupSeconds: acquisitionTimings.pageSetupSeconds ?? null,
+                routeSetupSeconds: acquisitionTimings.routeSetupSeconds ?? null,
+                navigationWaitUntil: acquisitionTimings.navigationWaitUntil ?? null,
+                navigationStartedSeconds: acquisitionTimings.navigationStartedSeconds ?? null,
+                documentHeadersSeconds: acquisitionTimings.documentHeadersSeconds ?? acquisition.firstHttpSeconds ?? null,
+                documentBodyReadSeconds: acquisitionTimings.documentBodyReadSeconds ?? null,
+                navigationWaitSeconds: acquisitionTimings.navigationWaitSeconds ?? null,
+                domContentLoadedSeconds: acquisitionTimings.domContentLoadedSeconds ?? null,
+                pageContentSeconds: acquisitionTimings.pageContentSeconds ?? null,
+                htmlPreparationSeconds: acquisitionTimings.htmlPreparationSeconds ?? null,
+                browserCloseSeconds: acquisitionTimings.browserCloseSeconds ?? acquisition.closeSeconds ?? null,
+                proxyBridgeCloseSeconds: acquisition.proxyBridge?.closeSeconds ?? null,
+                acquisitionWithBridgeSeconds: state.timings.acquisition ?? null,
+                nuxtParserSeconds: state.timings.extraction ?? null,
+                datasetSaveSeconds: state.timings.datasetSave ?? null,
+                totalRunSeconds: state.elapsedSeconds,
+            });
+        }
         metadata.status = state.status; metadata.executionMode = state.executionMode ?? null;
         metadata.transport = state.transport ?? null;
         metadata.extractionPerformed = state.extractionPerformed;

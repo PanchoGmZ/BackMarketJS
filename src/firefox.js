@@ -50,6 +50,7 @@ export async function acquire(input, options = {}) {
     let browserProxy = proxy;
     let proxyBridge = false;
     let bridgeSetupSeconds = 0;
+    let result = null;
 
     try {
         if (proxy) {
@@ -75,7 +76,7 @@ export async function acquire(input, options = {}) {
             throw new ExtractionError('PROXY_BRIDGE_INIT_ERROR', 'proxy-bridge');
         }
 
-        const result = await acquireOnce(input, {
+        result = await acquireOnce(input, {
             ...acquisitionOptions,
             proxy: browserProxy,
             proxyMode,
@@ -89,13 +90,26 @@ export async function acquire(input, options = {}) {
         return result;
     } finally {
         if (localProxyUrl) {
+            const bridgeCloseStarted = performance.now();
+            let bridgeCloseStatus = 'closed';
             try {
                 await closeAnonymizedProxyFn(localProxyUrl, true);
-                event('PROXY_BRIDGE', { status: 'closed', forced: true });
+                event('PROXY_BRIDGE', { status: 'closed', forced: true,
+                    seconds: (performance.now() - bridgeCloseStarted) / 1000 });
             } catch {
+                bridgeCloseStatus = 'close-error';
                 // Cleanup diagnostics must not mask the acquisition result or
                 // expose an error message that could contain the upstream URL.
                 event('PROXY_BRIDGE', { status: 'close-error', code: 'PROXY_BRIDGE_CLOSE_ERROR' }, 'warning');
+            }
+            if (result?.acquisition) {
+                const closeSeconds = (performance.now() - bridgeCloseStarted) / 1000;
+                result.acquisition.proxyBridge.closeStatus = bridgeCloseStatus;
+                result.acquisition.proxyBridge.closeSeconds = closeSeconds;
+                if (result.acquisition.timings) {
+                    result.acquisition.timings.proxyBridgeSetupSeconds = bridgeSetupSeconds;
+                    result.acquisition.timings.proxyBridgeCloseSeconds = closeSeconds;
+                }
             }
         }
     }

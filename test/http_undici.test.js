@@ -49,29 +49,37 @@ async function runHttp(acquired, url = fixture().expected.url) {
     return { ...result, actor };
 }
 
-test('transport defaults to Chromium; runtime and Apify schema reject invalid values', () => {
+test('transport defaults to Firefox normal mode; fast mode is opt-in and Firefox-only', () => {
     const schema = JSON.parse(read('../.actor/input_schema.json'));
     const validate = new Ajv({ strict: false }).compile(schema);
     const url = fixture().expected.url;
-    assert.equal(schema.properties.transport.default, 'chromium');
+    assert.equal(schema.properties.transport.default, 'firefox');
+    assert.equal(schema.properties.firefoxFastMode.default, false);
     assert.deepEqual(schema.properties.transport.enum, ['chromium', 'firefox', 'undici']);
-    assert.equal(parseInput({ url }).transport, 'chromium');
+    assert.equal(parseInput({ url }).transport, 'firefox');
+    assert.equal(parseInput({ url }).firefoxFastMode, false);
     for (const transport of ['chromium', 'firefox', 'undici']) { assert.equal(parseInput({ url, transport }).transport, transport); assert.equal(validate({ url, transport }), true); }
+    assert.equal(parseInput({ url, transport:'firefox', firefoxFastMode:true }).firefoxFastMode, true);
+    assert.equal(validate({ url, transport:'firefox', firefoxFastMode:true }), true);
+    assert.throws(() => parseInput({ url, transport:'chromium', firefoxFastMode:true }), e => e.code === 'INVALID_INPUT');
     for (const transport of ['', 'UNDICI', null, false, {}, 'auto']) {
         assert.throws(() => parseInput({ url, transport }), e => e.code === 'INVALID_INPUT');
         assert.equal(validate({ url, transport }), false);
     }
 });
-test('omitted transport and explicit Chromium use the existing acquisition injection', async () => {
-    for (const transport of [undefined, 'chromium']) {
+test('omitted transport selects Firefox; explicit Chromium retains its acquisition path', async () => {
+    for (const [transport, expectedTransport] of [[undefined, 'firefox'], ['firefox', 'firefox'], ['chromium', 'chromium']]) {
         const { html, expected } = fixture();
         const actor = new FakeActor({ url: expected.url, ...(transport ? { transport } : {}), proxyConfiguration: { useApifyProxy: false } });
-        let calls = 0;
+        let chromiumCalls = 0, firefoxCalls = 0;
         const result = await runActor({ actor, budget: new Budget({ elapsed: () => 0 }),
-            acquireFn: async input => { calls++; assert.equal(input.transport, 'chromium'); return { html, responses: {}, acquisition: { status: 'received', requests: [] } }; },
+            acquireFn: async input => { chromiumCalls++; assert.equal(input.transport, 'chromium'); return { html, responses: {}, acquisition: { status: 'received', requests: [] } }; },
+            firefoxAcquireFn: async input => { firefoxCalls++; assert.equal(input.transport, 'firefox'); return { html, responses: {}, acquisition: { status: 'received', requests: [] } }; },
             httpAcquireFn: () => assert.fail('Undici must be opt-in') });
-        assert.equal(calls, 1); assert.equal(result.exitCode, 0); assert.deepEqual(actor.records, [expected]);
-        assert.equal(result.state.transport, 'chromium'); assert.equal(result.state.extractionMethod, 'nuxt');
+        assert.equal(result.exitCode, 0); assert.deepEqual(actor.records, [expected]);
+        assert.equal(result.state.transport, expectedTransport); assert.equal(result.state.extractionMethod, 'nuxt');
+        assert.equal(chromiumCalls, expectedTransport === 'chromium' ? 1 : 0);
+        assert.equal(firefoxCalls, expectedTransport === 'firefox' ? 1 : 0);
     }
 });
 for (const id of ids) test('Undici MockAgent keeps all eleven reference fields and shared Actor states: ' + id, async () => {
