@@ -11,13 +11,41 @@ function visibleChallenge(html) {
     $('script,style,noscript').remove();
     return /just a moment|verify.*human|security verification|captcha/i.test(title) || /bot-need-challenge/i.test($('body').text());
 }
+function proxyChainFailure(status, statusText) {
+    // proxy-chain writes a custom status text: upstream responses use
+    // `UPSTREAM<status>`; socket errors use their Node error code. Its
+    // CONNECT failure codes are reserved by the library for this bridge.
+    if (status === 597 && /^UPSTREAM(?:401|407)$/.test(statusText))
+        return { code: 'PROXY_UPSTREAM_AUTH_REJECTED', category: 'upstream-auth-rejected' };
+    if (status === 590 && /^UPSTREAM\d{3}$/.test(statusText))
+        return { code: 'PROXY_UPSTREAM_HTTP_ERROR', category: 'upstream-response' };
+    const failures = {
+        504: { code: 'PROXY_UPSTREAM_CONNECTION_ERROR', category: 'upstream-timeout', reasons: ['ETIMEDOUT'] },
+        592: { code: 'PROXY_UPSTREAM_CONNECTION_ERROR', category: 'upstream-response', reasons: [/^UPSTREAM\d+$/] },
+        593: { code: 'PROXY_UPSTREAM_CONNECTION_ERROR', category: 'upstream-dns', reasons: ['ENOTFOUND', 'EAI_AGAIN', 'EAI_NODATA', 'EAI_NONAME'] },
+        594: { code: 'PROXY_UPSTREAM_CONNECTION_ERROR', category: 'upstream-connection', reasons: ['ECONNREFUSED'] },
+        595: { code: 'PROXY_UPSTREAM_CONNECTION_ERROR', category: 'upstream-connection', reasons: ['ECONNRESET'] },
+        596: { code: 'PROXY_UPSTREAM_CONNECTION_ERROR', category: 'upstream-connection', reasons: ['EPIPE'] },
+        599: { code: 'PROXY_UPSTREAM_CONNECTION_ERROR', category: 'upstream-connection', reasons: ['Upstream Closed Early', 'ECONNRESET', 'ETIMEDOUT'] },
+    };
+    const failure = failures[status];
+    return failure?.reasons.some(reason => reason instanceof RegExp ? reason.test(statusText) : reason === statusText)
+        ? { code: failure.code, category: failure.category } : null;
+}
+function proxyBridgeNavigationFailure(diagnosis) {
+    if (diagnosis.category === 'proxy-authentication')
+        return { code: 'PROXY_UPSTREAM_AUTH_REJECTED', category: 'upstream-auth-rejected' };
+    if (diagnosis.category === 'proxy-connection' || diagnosis.category === 'proxy-tunnel')
+        return { code: 'PROXY_BRIDGE_CONNECTION_ERROR', category: 'bridge-connection-undetermined' };
+    return null;
+}
 const RECOVERY_DELAY_MS = 2500;
 // Keep enough time for a cold browser start, navigation, and bounded close.
 const MIN_SECOND_ATTEMPT_WINDOW_MS = 10000;
 const CLEANUP_RESERVE_MS = 2000;
 
 async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budget, signal, browserType = chromium,
-    attemptNumber = 1, transport = 'chromium' } = {}) {
+    attemptNumber = 1, transport = 'chromium', proxyBridge = false } = {}) {
     const started = performance.now(), remaining = () => Math.min(budget.remaining(budget.acquisition), budget.remaining());
     const tlsVerified = proxyMode !== 'unblocker';
     const report = { status: 'running', navigationCount: 0, directApiRequests: 0, requests: [], redirects: [],
@@ -25,8 +53,9 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
         http2Disabled: transport === 'chromium' && input.disableHttp2 === true, attemptNumber,
         ...(transport === 'chromium' ? {} : { transport }) };
     report.proxyTransport = { mode: proxyMode, configured: Boolean(proxy),
-        usernameProvided: Boolean(proxy?.username), passwordProvided: Boolean(proxy?.password),
-        credentialBinding: proxy ? 'playwright-launch-fields' : 'none' };
+        usernameProvided: proxyBridge ? false : Boolean(proxy?.username),
+        passwordProvided: proxyBridge ? false : Boolean(proxy?.password),
+        credentialBinding: proxyBridge ? 'proxy-chain-loopback' : proxy ? 'playwright-launch-fields' : 'none' };
     let browser, context, page, html = '', accepted = false, closing = false;
     const responses = {}, tasks = new Set(), ready = deferred(), stopped = deferred(), deniedOptional = new Set();
     const origin = new URL(input.url).origin, base = '/product-page/products/' + input.productId;
@@ -106,7 +135,12 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
         });
         page.on('requestfailed', request => {
             if (closing || accepted || !request.isNavigationRequest() || request.frame() !== page.mainFrame()) return;
-            const diagnosis = navigationFailure(request.failure()?.errorText, 'navigation', 'requestfailed');
+            let diagnosis = navigationFailure(request.failure()?.errorText, 'navigation', 'requestfailed');
+            const bridgeFailure = proxyBridge ? proxyBridgeNavigationFailure(diagnosis) : null;
+            if (bridgeFailure) {
+                diagnosis = { ...diagnosis, ...bridgeFailure, stage: 'proxy-bridge' };
+                event('PROXY_BRIDGE', { status: 'error', code: bridgeFailure.code, category: bridgeFailure.category }, 'warning');
+            }
             report.navigationFailures.push(diagnosis); report.navigationFailures = report.navigationFailures.slice(-4);
             event('REQUEST_FAILED', { code: diagnosis.code, category: diagnosis.category, signals: diagnosis.signals }, 'warning');
         });
@@ -128,15 +162,22 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
             }
             const explicit = url.origin === origin && (headers['cf-mitigated'] === 'challenge' || challengeUrl(response.url())
                 || (doc && location && challengeUrl(new URL(location, response.url()).href)));
-            const failure = classifyHttp(category, status, explicit);
+            const bridgeFailure = proxyBridge ? proxyChainFailure(status, response.statusText()) : null;
+            const failure = bridgeFailure ? { status: 'error', code: bridgeFailure.code }
+                : proxyBridge && status === 407 ? { status: 'error', code: 'HTTP_407' }
+                : classifyHttp(category, status, explicit);
             if (!doc && !kind && !explicit && status < 400) return;
             const item = { url: safeUrl(response.url()), category, httpStatus: status, contentType: headers['content-type'] ?? '',
                 contentLengthBytes: /^\d+$/.test(headers['content-length'] ?? '') ? Number(headers['content-length']) : null,
-                cfRay: headers['cf-ray'] ?? null };
+                cfRay: headers['cf-ray'] ?? null,
+                ...(bridgeFailure ? { proxyBridgeFailure: bridgeFailure.category } : {}) };
             report.requests.push(item); event('HTTP', item);
             if (failure) {
                 report.cfRay = item.cfRay;
-                fail(failure.status, failure.code, doc ? 'navigation' : 'commercial-response');
+                if (bridgeFailure)
+                    event('PROXY_BRIDGE', { status: 'error', code: bridgeFailure.code, category: bridgeFailure.category,
+                        upstreamStatus: status }, 'warning');
+                fail(failure.status, failure.code, bridgeFailure ? 'proxy-bridge' : doc ? 'navigation' : 'commercial-response');
                 return;
             }
             if (status >= 400) {
@@ -163,12 +204,19 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
             }).catch(error => {
                 if (accepted || closing || report.error) return;
                 const documents = report.requests.filter(r => r.category === 'document');
-                report.navigationError = { ...navigationFailure(error, 'navigation', 'page.goto'),
+                let diagnosis = navigationFailure(error, 'navigation', 'page.goto');
+                const bridgeFailure = proxyBridge ? proxyBridgeNavigationFailure(diagnosis) : null;
+                if (bridgeFailure) {
+                    diagnosis = { ...diagnosis, ...bridgeFailure, stage: 'proxy-bridge' };
+                    event('PROXY_BRIDGE', { status: 'error', code: bridgeFailure.code, category: bridgeFailure.category }, 'warning');
+                }
+                report.navigationError = { ...diagnosis,
                     seconds: (performance.now() - navigationStarted) / 1000,
                     documentResponsesObserved: documents.length, httpStatus: documents.at(-1)?.httpStatus ?? null,
                     requestFailureSignals: [...new Set(report.navigationFailures.flatMap(d => d.signals))] };
                 event('CAUSA_NAVEGACION', report.navigationError, 'warning');
-                fail(report.navigationError.code === 'TIMEOUT' ? 'partial' : 'error', report.navigationError.code);
+                fail(report.navigationError.code === 'TIMEOUT' ? 'partial' : 'error', report.navigationError.code,
+                    bridgeFailure ? 'proxy-bridge' : 'navigation');
             });
         await bounded(Promise.race([ready.promise, stopped.promise, navigation]), remaining() - 2000, signal, 'navigation');
         if (accepted && !report.error) {

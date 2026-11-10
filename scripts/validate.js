@@ -26,6 +26,7 @@ for(const collection of Object.values(json('.actor/key_value_store_schema.json')
 assert.equal(json('.actor/output_schema.json').properties.products.template,'{{links.apiDefaultDatasetUrl}}/items');
 const pkg=json('package.json'),lock=json('package-lock.json');
 for(const [name,version] of Object.entries(pkg.dependencies))assert.equal(lock.packages['node_modules/'+name].version,version);
+assert.equal(pkg.dependencies['proxy-chain'],'3.0.1');
 const dockerfile=readFileSync('Dockerfile','utf8');
 assert.match(dockerfile,/playwright install --with-deps chromium firefox/);
 const browserManifest=json('node_modules/playwright-core/browsers.json');

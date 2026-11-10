@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { log } from 'apify';
+import { anonymizeProxy, closeAnonymizedProxy } from 'proxy-chain';
 import { runActor } from '../src/run.js';
 import { Budget } from '../src/budget.js';
 import { proxySettings, configureProxy } from '../src/proxy.js';
@@ -219,8 +220,11 @@ function browserSequence(outcomes,{productUrl=expected.url,documentHtml=html}={}
             }
             if(typeof outcome==='object'&&outcome.pending)return new Promise(()=>{});
             const status=typeof outcome==='number'?outcome:outcome.status;
+            const statusText=typeof outcome==='object'&&outcome.statusText ? outcome.statusText
+                : {504:'ETIMEDOUT',590:'UPSTREAM502',592:'UPSTREAM1000',593:'ENOTFOUND',
+                    594:'ECONNREFUSED',595:'ECONNRESET',596:'EPIPE',597:'UPSTREAM407',599:'Upstream Closed Early'}[status] ?? 'OK';
             page.emit('response',{url:()=>productUrl,headers:()=>({'content-type':'text/html','cf-ray':'synthetic-ray'}),
-                status:()=>status,request,frame:()=>page,body:async()=>Buffer.from(documentHtml)});
+                status:()=>status,statusText:()=>statusText,request,frame:()=>page,body:async()=>Buffer.from(documentHtml)});
             if(typeof outcome==='object'&&outcome.failureCode){
                 page.emit('requestfailed',{...request(),failure:()=>({errorText:'net::'+outcome.failureCode})});
                 throw new Error('Page.goto: net::'+outcome.failureCode);
@@ -243,23 +247,41 @@ async function acquireSequence(outcomes,{productUrl=expected.url,remainingMs=480
     const result=await acquire(input,{budget,proxy,proxyMode,browserType,sleepImpl});
     return {result,stats,input,remaining};
 }
-test('Firefox Playwright transport uses one browser lifecycle, forwards Apify proxy auth, shares Nuxt parser and preserves 1688 output',async()=>{
-    const proxy={server:'http://proxy.invalid:8000',username:'groups-UNBLOCKER',password:'PRIVATE'};
+test('proxy-chain anonymizeProxy returns an unauthenticated loopback proxy and closes it',async()=>{
+    const upstream='http://groups-UNBLOCKER:offline%40credential@proxy.invalid:8000';
+    const localUrl=await anonymizeProxy({url:upstream});
+    const local=new URL(localUrl);
+    assert.equal(local.protocol,'http:');assert.equal(local.hostname,'127.0.0.1');
+    assert.ok(Number(local.port)>0);assert.equal(local.username,'');assert.equal(local.password,'');
+    assert.equal(await closeAnonymizedProxy(localUrl,true),true);
+    assert.equal(await closeAnonymizedProxy(localUrl,true),false);
+});
+test('Firefox proxy-chain transport shares Nuxt parser and preserves the 1688 output without exposing upstream credentials to Firefox',async()=>{
+    const proxy={server:'http://proxy.invalid:8000',username:'groups-UNBLOCKER',password:'PRIVATE:@%+ value'};
     const actor=new FakeActor({url:expected.url,transport:'firefox',
         proxyConfiguration:{useApifyProxy:true,apifyProxyGroups:['UNBLOCKER']},proxyAccessAuthorized:true});
     const {browserType,stats}=browserSequence([200],{productUrl:expected.url});
+    let upstreamUrlSeen, closedUrl, closeForced;
     const result=await runActor({actor,budget:clock(),proxyFn:async()=>proxy,
-        firefoxAcquireFn:(input,context)=>acquireFirefox(input,{...context,browserType})});
+        firefoxAcquireFn:(input,context)=>acquireFirefox(input,{...context,browserType,
+            anonymizeProxyFn:async ({url})=>{upstreamUrlSeen=new URL(url);return 'http://127.0.0.1:43127';},
+            closeAnonymizedProxyFn:async (url,force)=>{closedUrl=url;closeForced=force;return true;}})});
     const report=result.state.acquisition;
     assert.equal(result.state.transport,'firefox');assert.equal(result.state.status,'success');assert.equal(result.exitCode,0);
     assert.equal(report.transport,'firefox');assert.equal(report.status,'received');assert.equal(report.attemptCount,1);
+    assert.equal(result.state.proxy.connected,true);
     assert.equal(report.navigationCount,1);assert.equal(report.requests[0].httpStatus,200);
     assert.equal(report.tlsVerified,false);assert.equal(report.http2Disabled,false);
     assert.deepEqual(stats.urls,[expected.url]);assert.equal(stats.navigations,1);
     assert.equal(stats.closes,1);assert.equal(stats.active,false);
-    assert.equal(stats.launchOptions[0].proxy.server,proxy.server);
-    assert.equal(stats.launchOptions[0].proxy.username,proxy.username);
-    assert.equal(stats.launchOptions[0].proxy.password,proxy.password);
+    assert.deepEqual(stats.launchOptions[0].proxy,{server:'http://127.0.0.1:43127'});
+    assert.equal(upstreamUrlSeen.protocol,'http:');assert.equal(upstreamUrlSeen.hostname,'proxy.invalid');assert.equal(upstreamUrlSeen.port,'8000');
+    assert.equal(decodeURIComponent(upstreamUrlSeen.username),proxy.username);
+    assert.equal(decodeURIComponent(upstreamUrlSeen.password),proxy.password);
+    assert.equal(closedUrl,'http://127.0.0.1:43127');assert.equal(closeForced,true);
+    assert.deepEqual(report.proxyTransport,{mode:'unblocker',configured:true,usernameProvided:false,passwordProvided:false,
+        credentialBinding:'proxy-chain-loopback'});
+    assert.equal(report.proxyBridge.status,'ready');assert.equal(report.proxyBridge.listenHost,'127.0.0.1');
     assert.equal(Object.hasOwn(stats.launchOptions[0],'args'),false);
     assert.equal(Object.hasOwn(stats.launchOptions[0],'channel'),false);
     assert.equal(stats.contextOptions[0].ignoreHTTPSErrors,true);
@@ -267,6 +289,70 @@ test('Firefox Playwright transport uses one browser lifecycle, forwards Apify pr
     assert.deepEqual(stats.trace,['launch:0','goto:0','close:0']);
     assert.deepEqual(actor.records,[expected]);assert.equal(Object.keys(actor.records[0]).length,11);
     assert.equal(JSON.stringify(result.state).includes('PRIVATE'),false);
+});
+test('Firefox maps proxy-chain upstream 407 to authentication rejection and always closes browser then bridge',async()=>{
+    const input=parseInput({url:expected.url,transport:'firefox'});
+    const proxy={server:'http://proxy.invalid:8000',username:'groups-UNBLOCKER',password:'PRIVATE'};
+    const {browserType,stats}=browserSequence([597]);
+    let bridgeClosed=false;
+    const result=await acquireFirefox(input,{budget:{acquisition:48000,remaining:()=>48000},proxy,proxyMode:'unblocker',browserType,
+        anonymizeProxyFn:async()=> 'http://127.0.0.1:43128',
+        closeAnonymizedProxyFn:async (_url,force)=>{assert.equal(force,true);assert.equal(stats.active,false);bridgeClosed=true;}});
+    assert.equal(result.acquisition.status,'error');
+    assert.equal(result.acquisition.error.code,'PROXY_UPSTREAM_AUTH_REJECTED');
+    assert.equal(result.acquisition.failureStage,'proxy-bridge');
+    assert.equal(result.acquisition.requests[0].httpStatus,597);
+    assert.equal(result.acquisition.requests[0].proxyBridgeFailure,'upstream-auth-rejected');
+    assert.equal(stats.launchOptions[0].proxy.server,'http://127.0.0.1:43128');
+    assert.equal(stats.closes,1);assert.equal(bridgeClosed,true);
+});
+test('Firefox only classifies proxy-chain status 597 with an upstream 401 or 407 as authentication rejection',async()=>{
+    const input=parseInput({url:expected.url,transport:'firefox'});
+    const {browserType}=browserSequence([{status:597,statusText:'Destination Custom Status'}]);
+    const result=await acquireFirefox(input,{budget:{acquisition:48000,remaining:()=>48000},
+        proxy:{server:'http://proxy.invalid:8000',username:'groups-UNBLOCKER',password:'PRIVATE'},proxyMode:'unblocker',browserType,
+        anonymizeProxyFn:async()=> 'http://127.0.0.1:43129',closeAnonymizedProxyFn:async()=>true});
+    assert.equal(result.acquisition.error.code,'APIFY_PROXY_HTTP_597');
+    assert.equal(result.acquisition.requests[0].proxyBridgeFailure,undefined);
+    const {browserType:authBrowser}=browserSequence([{status:597,statusText:'UPSTREAM401'}]);
+    const auth=await acquireFirefox(input,{budget:{acquisition:48000,remaining:()=>48000},
+        proxy:{server:'http://proxy.invalid:8000',username:'groups-UNBLOCKER',password:'PRIVATE'},proxyMode:'unblocker',browserType:authBrowser,
+        anonymizeProxyFn:async()=> 'http://127.0.0.1:43130',closeAnonymizedProxyFn:async()=>true});
+    assert.equal(auth.acquisition.error.code,'PROXY_UPSTREAM_AUTH_REJECTED');
+});
+test('Firefox maps an upstream proxy authentication navigation failure from its browser signal',async()=>{
+    const input=parseInput({url:expected.url,transport:'firefox'});
+    const {browserType,stats}=browserSequence(['NS_ERROR_PROXY_AUTHENTICATION_FAILED']);
+    const result=await acquireFirefox(input,{budget:{acquisition:48000,remaining:()=>48000},
+        proxy:{server:'http://proxy.invalid:8000',username:'groups-UNBLOCKER',password:'PRIVATE'},proxyMode:'unblocker',browserType,
+        anonymizeProxyFn:async()=> 'http://127.0.0.1:43131',closeAnonymizedProxyFn:async()=>true});
+    assert.equal(result.acquisition.error.code,'PROXY_UPSTREAM_AUTH_REJECTED');
+    assert.equal(result.acquisition.failureStage,'proxy-bridge');
+    assert.equal(stats.closes,1);
+});
+test('Firefox distinguishes proxy-chain upstream HTTP and connection failures from destination responses',async()=>{
+    const input=parseInput({url:expected.url,transport:'firefox'});
+    const proxy={server:'http://proxy.invalid:8000',username:'groups-UNBLOCKER',password:'PRIVATE'};
+    for (const [outcome,code,category] of [
+        [{status:590,statusText:'UPSTREAM403'},'PROXY_UPSTREAM_HTTP_ERROR','upstream-response'],
+        [{status:594,statusText:'ECONNREFUSED'},'PROXY_UPSTREAM_CONNECTION_ERROR','upstream-connection'],
+    ]) {
+        const {browserType}=browserSequence([outcome]);
+        const result=await acquireFirefox(input,{budget:{acquisition:48000,remaining:()=>48000},proxy,proxyMode:'unblocker',browserType,
+            anonymizeProxyFn:async()=> 'http://127.0.0.1:43132',closeAnonymizedProxyFn:async()=>true});
+        assert.equal(result.acquisition.error.code,code);
+        assert.equal(result.acquisition.requests[0].proxyBridgeFailure,category);
+        assert.equal(result.acquisition.failureStage,'proxy-bridge');
+    }
+});
+test('Firefox bridge initialization errors are classified and do not launch a browser',async()=>{
+    const input=parseInput({url:expected.url,transport:'firefox'});
+    const {browserType,stats}=browserSequence([200]);
+    await assert.rejects(()=>acquireFirefox(input,{budget:{acquisition:48000,remaining:()=>48000},
+        proxy:{server:'http://proxy.invalid:8000',username:'groups-UNBLOCKER',password:'PRIVATE'},proxyMode:'unblocker',browserType,
+        anonymizeProxyFn:async()=>{throw new Error('must not leak this upstream secret');}}),
+    error=>error.code==='PROXY_BRIDGE_INIT_ERROR');
+    assert.equal(stats.launches,0);assert.equal(stats.navigations,0);
 });
 test('Firefox applies the shared maximum HTML body size before returning a document',async()=>{
     const input=parseInput({url:expected.url,transport:'firefox'},

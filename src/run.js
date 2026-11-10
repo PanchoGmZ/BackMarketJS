@@ -69,7 +69,12 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
             html = result.html; responses = result.responses; state.acquisition = result.acquisition;
             recoveryAttempted = state.acquisition.recovery?.attempted === true;
             const document = state.acquisition.requests?.filter(r => r.category === 'document').at(-1);
-            state.proxy.connected = document ? document.httpStatus !== 407 : null;
+            const firefoxBridgeFailed = input.transport === 'firefox'
+                && /^PROXY_(?:BRIDGE|UPSTREAM)_/.test(state.acquisition.error?.code ?? '');
+            const firefoxBridgeReady = input.transport === 'firefox' && state.acquisition.proxyBridge?.status === 'ready';
+            state.proxy.connected = firefoxBridgeFailed ? false : document
+                ? (firefoxBridgeReady ? true : document.httpStatus !== 407)
+                : null;
             state.proxy.documentRequestSucceeded = Boolean(document?.httpStatus === 200 && state.acquisition.status === 'received');
             if (state.acquisition.status !== 'received') {
                 const error = state.acquisition.error ?? { code: 'ACQUISITION_ERROR' };
