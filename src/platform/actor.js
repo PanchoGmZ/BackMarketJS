@@ -79,9 +79,11 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
         }
         state.extractionPerformed = true;
         input._documentUrl = state.acquisition.finalUrl;
+        input._redirects = state.acquisition.redirects ?? [];
         state.stage = 'transformation';
         const result = await timed('extraction', async () => extractHtml(html, input, responses));
         const { output, missing, commercial } = result; metadata = result.metadata;
+        if (metadata.identityResolution) state.identityResolution = metadata.identityResolution;
         const identity = commercial.product?.productId?.toLowerCase() === input.productId;
         state.productDocument = { verified: Boolean(identity && output.title), uuidMatches: identity, titleFound: Boolean(output.title) };
         event('DOCUMENTO_PRODUCTO', state.productDocument);
@@ -130,6 +132,10 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
             event('PRODUCTO_PARCIAL_UTILIZABLE', { status: state.status, missingFields: missing, savedResults: state.savedResults }, 'warning');
         state.stage = 'finished';
     } catch (error) {
+        if (error?.details?.identityResolution) {
+            metadata.identityResolution = error.details.identityResolution;
+            state.identityResolution = error.details.identityResolution;
+        }
         const diagnosis = error instanceof ExtractionError ? { code: error.code, stage: error.stage }
             : state.stage === 'transformation' ? { code: ['PRODUCT_ID_MISMATCH', 'INVALID_REFERENCE1688_CONTRACT'].includes(error?.message)
                 ? error.message : 'NUXT_EXTRACTION_ERROR', stage: state.stage }

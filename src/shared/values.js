@@ -16,7 +16,8 @@ export function imageUrl(v) {
     catch { return null; }
 }
 export class ExtractionError extends Error {
-    constructor(code, stage, status = 'error') {
+    constructor(code, stage, status = 'error', details = null) {
         super(code); this.code = code; this.stage = stage; this.status = status;
+        if (record(details)) this.details = details;
     }
 }

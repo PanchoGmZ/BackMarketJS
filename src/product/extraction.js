@@ -159,7 +159,8 @@ export function extractHtml(html, input, responses = {}, prepared = null) {
         const identity = resolveShortIdentity(html, input, $, scripts.filter(s => !s.entry.parseError).map(s => s.parsed));
         const result = extractHtml(html, { ...input, productId: identity.productId }, responses, { document: $, scripts });
         verifyShortOffer(result, identity);
-        result.metadata.productIdentity = { urlForm: 'short', ...identity };
+        result.metadata.identityResolution = identity.diagnostics;
+        result.metadata.productIdentity = { urlForm: 'short', productId: identity.productId, sources: identity.sources };
         // Bind the resolved identity only after validation, for the unchanged Actor guard.
         input.productId = identity.productId;
         return result;

@@ -48,7 +48,7 @@ Las condiciones se representan en `variations`, dentro del grupo `grades` (o el 
 
 El peso se publica como numero en kg redondeado a dos decimales; el valor convertido original y su origen se conservan en metadata. Si un peso positivo quedara redondeado a cero, se devuelve `null` y se registra `POSITIVE_WEIGHT_BELOW_TWO_DECIMAL_PRECISION`.
 
-Para URLs cortas se consideran URL final, canonical y JSON-LD vinculados a la pagina, y registros Nuxt de producto o picker seleccionado asociados a su slug. La identidad debe ser unica y su oferta debe verificarse. Sin vinculo explicito se devuelve `SHORT_URL_IDENTITY_UNVERIFIED`; si hay identidades contradictorias, `SHORT_URL_IDENTITY_AMBIGUOUS`.
+Para URLs cortas se consideran URL final, canonical y JSON-LD vinculados a la pagina, ademas del estado Nuxt asociado a esa pagina y sus opciones seleccionadas. Si cambia el slug, la URL final solo se acepta con una redireccion registrada desde la URL solicitada. La identidad debe ser unica y la oferta y el precio deben corresponder al producto seleccionado. Sin UUID verificable se devuelve `SHORT_URL_IDENTITY_UNVERIFIED`; con UUIDs contradictorios, `SHORT_URL_IDENTITY_AMBIGUOUS`.
 
 ## Limitaciones
 
