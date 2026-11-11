@@ -7,17 +7,22 @@ export function productUrlIdentity(value) {
     let url;
     try { url = new URL(value); } catch { throw new ExtractionError('INVALID_PRODUCT_URL', 'input'); }
     const match = url.pathname.match(productPath);
-    if (url.protocol !== 'https:' || url.host !== 'www.backmarket.com' || url.username || url.password || url.hash || !match
+    if (value.length > 8192 || url.protocol !== 'https:' || url.host !== 'www.backmarket.com' || url.username || url.password || !match
         || (!match[2] && !/^[a-z0-9][a-z0-9-]*$/i.test(match[1])))
         throw new ExtractionError('INVALID_PRODUCT_URL', 'input');
     selectionParameters(value);
     return { slug: match[1], productId: match[2]?.toLowerCase() ?? null };
 }
-export function selectionParameters(value, strict = true) {
-    const url = new URL(value), result = {};
+export function selectionParameters(value) {
+    const url = new URL(value), result = Object.create(null);
+    const seen = new Set();
     for (const [k, v] of url.searchParams) {
-        if (!keys.has(k)) { if (strict) throw new ExtractionError('INVALID_URL_QUERY', 'input'); continue; }
-        if (Object.hasOwn(result, k) || !selectionValue.test(v)) throw new ExtractionError('INVALID_URL_SELECTION', 'input');
+        if (seen.has(k) || !/^[A-Za-z0-9_.-]{1,100}$/.test(k) || v.length > 500 || /[\u0000-\u001f\u007f]/.test(v))
+            throw new ExtractionError('INVALID_URL_SELECTION', 'input');
+        seen.add(k);
+        if (keys.has(k) && !selectionValue.test(v)) throw new ExtractionError('INVALID_URL_SELECTION', 'input');
+        // Unknown query fields are preserved and conservatively treated as commercial.
+        // The original URL (including interface query and fragment) is sent unchanged.
         result[k] = v;
     }
     return result;
@@ -25,7 +30,7 @@ export function selectionParameters(value, strict = true) {
 export function selectionState(requestedUrl, finalUrl) {
     const requested = selectionParameters(requestedUrl);
     let final = {}, ambiguous = false;
-    try { final = selectionParameters(finalUrl, false); } catch { ambiguous = true; }
+    try { final = selectionParameters(finalUrl); } catch { ambiguous = true; }
     const preserved = !ambiguous && Object.entries(requested).every(([k, v]) => final[k] === v);
     return { requested, final, status: Object.keys(requested).length ? preserved ? 'preserved' : 'changed_or_removed' : 'not_requested' };
 }

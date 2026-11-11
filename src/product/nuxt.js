@@ -61,6 +61,9 @@ export function findCommerce(root, productId) {
         if (typeof value.productId === 'string' && UUID_RE.test(value.productId)) bound = value.productId.toLowerCase() === productId;
         const groups = value.pickerGroups;
         if (Array.isArray(groups)) {
+            if (!value.productId && typeof value.selectedOffer?.productId === 'string'
+                && value.selectedOffer.productId.toLowerCase() === productId)
+                bound = true;
             const selectedIds = groups.flatMap(g => Array.isArray(g?.items) ? g.items : [])
                 .filter(i => i?.selected === true && typeof i.productId === 'string').map(i => i.productId.toLowerCase());
             bound = bound || selectedIds.includes(productId);

@@ -8,7 +8,7 @@
     "url": {
       "title": "URL del producto",
       "type": "string",
-      "description": "URL HTTPS de una ficha de www.backmarket.com. Conserva los parametros comerciales l y offerType.",
+      "description": "URL HTTPS de una ficha de www.backmarket.com, con UUID o identidad verificable en el documento. Conserva l, offerType, parametros picker y fragmentos.",
       "editor": "textfield",
       "prefill": ""
     },

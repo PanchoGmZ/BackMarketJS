@@ -4,7 +4,7 @@ import { UUID_RE, ExtractionError, record } from '../shared/values.js';
 
 // Only for short URLs. Page identity must be explicit; unique recommendations
 // or an arbitrary UUID found in a Nuxt cache are not evidence of page identity.
-export function resolveShortIdentity(html, input) {
+export function resolveShortIdentity(html, input, document = null, roots = []) {
     const requested = productUrlIdentity(input.url), candidates = new Map();
     let final;
     try { final = productUrlIdentity(input._documentUrl ?? input.url); }
@@ -25,13 +25,30 @@ export function resolveShortIdentity(html, input) {
         } catch { return null; }
     }
     if (final.productId) add(final.productId, 'final-url');
-    const $ = load(html);
+    const $ = document ?? load(html);
     $('link[rel]').each((_, element) => {
         const node = $(element);
         if (!(node.attr('rel') ?? '').toLowerCase().split(/\s+/).includes('canonical')) return;
         const link = pageLink(node.attr('href'));
         if (link?.productId) add(link.productId, 'canonical');
     });
+    // Only explicit product/selected-picker records associated with the requested
+    // page slug qualify. A unique unrelated UUID in a cache never qualifies.
+    const visited = new WeakSet(); let count = 0;
+    function walk(node, depth = 0) {
+        if (!node || typeof node !== 'object' || visited.has(node) || depth > 80) return;
+        visited.add(node);
+        if (++count > 50_000) throw new ExtractionError('SHORT_URL_IDENTITY_GRAPH_LIMIT', 'transformation');
+        if (record(node) && (node.selected === true || (record(node.titles) && Array.isArray(node.images)))) {
+            const linked = typeof node.slug === 'string' && slugs.has(node.slug)
+                || [node.url, node.canonicalUrl].some(value => pageLink(value));
+            if (linked) add(node.productId, 'nuxt-page-product');
+        }
+        if (record(node.selectedOffer) && (slugs.has(node.slug) || pageLink(node.url)))
+            add(node.selectedOffer.productId, 'nuxt-page-offer');
+        for (const child of Object.values(node)) walk(child, depth + 1);
+    }
+    for (const root of roots) walk(root);
     $('script[type="application/ld+json"]').each((_, element) => {
         let root;
         try { root = JSON.parse($(element).html() ?? ''); } catch { return; }

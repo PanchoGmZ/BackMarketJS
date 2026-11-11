@@ -6,8 +6,34 @@ import { productWeight } from './weight.js';
 import { resolveShortIdentity, verifyShortOffer } from './identity.js';
 import { array, object, record, text, decimal, decimalEqual, imageUrl, UUID_RE, UUID_SOURCE } from '../shared/values.js';
 
-const parameters = new Set(['grade', 'battery', 'premium_grade', 'battery_confidence_experiment',
-    'cheapest_for_first_picker', 'storage', 'color']);
+function conditionPrice(item, pickers, input, currency) {
+    if (item.available === false) return { status: 'unavailable', reason: 'CONDITION_UNAVAILABLE' };
+    if (item.productId?.toLowerCase() !== input.productId)
+        return { status: 'unverified', reason: 'CONDITION_CONFIGURATION_PRODUCT_MISMATCH' };
+    const selectedItems = pickers.pickerGroups.flatMap(g => g.items).filter(i => i.selected === true);
+    if (item.slug && selectedItems.some(i => i.slug && i.productId?.toLowerCase() === input.productId && i.slug !== item.slug))
+        return { status: 'unverified', reason: 'CONDITION_CONFIGURATION_SLUG_MISMATCH' };
+    for (const selected of selectedItems) for (const [key, value] of Object.entries(selected.parameters)) {
+        if (['grade', 'premium_grade'].includes(key)) continue;
+        if (Object.hasOwn(item.parameters, key) && item.parameters[key] !== value)
+            return { status: 'unverified', reason: 'CONDITION_SELECTION_PARAMETER_MISMATCH' };
+    }
+    for (const selected of selectedItems) for (const key of Object.keys(selected.parameters)) {
+        if (!['grade', 'premium_grade'].includes(key) && !Object.hasOwn(item.parameters, key))
+            return { status: 'unverified', reason: 'CONDITION_SELECTION_PARAMETER_MISSING' };
+    }
+    if (item.selected !== true) for (const [key, value] of new URL(input.url).searchParams) {
+        // Condition and picker UI flags are retained in navigation, but are not
+        // fixed hardware/offer settings when comparing other conditions.
+        if (['l', 'grade', 'premium_grade', 'closestPickerConfig', 'pickerClicked'].includes(key)
+            || /^(utm_|gclid$|fbclid$)/i.test(key)) continue;
+        if (!Object.hasOwn(item.parameters, key) || String(item.parameters[key]) !== value)
+            return { status: 'unverified', reason: 'CONDITION_URL_SELECTION_UNVERIFIED' };
+    }
+    if (item.price.amount === null || !item.price.currency || item.price.currency !== currency || item.available !== true)
+        return { status: 'unverified', reason: 'CONDITION_PRICE_OR_AVAILABILITY_UNVERIFIED' };
+    return { status: 'verified', reason: 'SAME_PRODUCT_AND_COMPATIBLE_SELECTION' };
+}
 export function commercialSubset(data) {
     const out = {};
     if (record(data.product)) {
@@ -24,7 +50,7 @@ export function commercialSubset(data) {
                 price: { amount: decimal(object(i.price).amount), currency: text(object(i.price).currency) },
                 available: typeof i.available === 'boolean' ? i.available : null,
                 selected: typeof i.selected === 'boolean' ? i.selected : null,
-                parameters: Object.fromEntries(Object.entries(object(i.parameters)).filter(([k, v]) => parameters.has(k)
+                parameters: Object.fromEntries(Object.entries(object(i.parameters)).filter(([k, v]) => /^[A-Za-z0-9_.-]{1,100}$/.test(k)
                     && (v === null || ['string', 'boolean'].includes(typeof v) || (typeof v === 'number' && Number.isFinite(v))))),
             })),
         })), selectedOffer: { price: { amount: decimal(price.amount), currency: text(price.currency) },
@@ -84,9 +110,12 @@ export function transform(input, raw, fallback = {}) {
         for (const [index, item] of group.items.entries()) {
             const associated = item.label !== null && item.productId !== null && UUID_RE.test(item.productId)
                 && item.price.currency !== null && /^[A-Z]{3}$/.test(item.price.currency);
-            variants.push({ name: item.label, price: associated ? item.price.amount : null, image: null });
+            const condition = /^(grades?|conditions?)$/i.test(group.id)
+                ? conditionPrice(item, pickers, input, selected.currency) : null;
+            variants.push({ name: item.label, price: associated && (!condition || condition.status === 'verified') ? item.price.amount : null, image: null });
             options.push({ variantIndex: index, productId: item.productId, available: item.available,
-                selected: item.selected, slug: item.slug, parameters: item.parameters, currency: item.price.currency });
+                selected: item.selected, slug: item.slug, parameters: item.parameters, currency: item.price.currency,
+                ...(condition ? { priceVerification: condition } : {}) });
         }
         variantGroups.push({ groupIndex: groups.length, id: group.id, options });
         groups.push({ name: group.id, variants });
@@ -113,31 +142,38 @@ export function transform(input, raw, fallback = {}) {
         weightNormalization: mass.metadata };
     return { output, metadata, missing, commercial: data };
 }
-export function extractHtml(html, input, responses = {}) {
+export function extractHtml(html, input, responses = {}, prepared = null) {
     if (typeof html !== 'string' || Buffer.byteLength(html) > input.maxHtmlBytes) throw new Error('HTML_TOO_LARGE_OR_INVALID');
+    const $ = prepared?.document ?? load(html);
+    const scripts = prepared?.scripts ?? [];
+    if (!prepared) $('script').each((_, node) => {
+        const script = $(node), raw = script.html() ?? '', id = script.attr('id') ?? '', type = script.attr('type') ?? '';
+        if (!['application/json', 'application/ld+json'].includes(type) && id !== '__NUXT_DATA__') return;
+        const entry = { id, type, format: id === '__NUXT_DATA__' ? 'nuxt' : type === 'application/ld+json' ? 'json-ld' : 'embedded-json', length: raw.length };
+        let parsed;
+        try { parsed = JSON.parse(raw); if (id === '__NUXT_DATA__') parsed = decode(parsed); }
+        catch { entry.parseError = true; }
+        scripts.push({ entry, parsed });
+    });
     if (input.productId === null) {
-        const identity = resolveShortIdentity(html, input);
-        const result = extractHtml(html, { ...input, productId: identity.productId }, responses);
+        const identity = resolveShortIdentity(html, input, $, scripts.filter(s => !s.entry.parseError).map(s => s.parsed));
+        const result = extractHtml(html, { ...input, productId: identity.productId }, responses, { document: $, scripts });
         verifyShortOffer(result, identity);
         result.metadata.productIdentity = { urlForm: 'short', ...identity };
         // Bind the resolved identity only after validation, for the unchanged Actor guard.
         input.productId = identity.productId;
         return result;
     }
-    const $ = load(html), data = {}, fallback = {}, inventory = [], sources = {};
+    const data = {}, fallback = {}, inventory = [], sources = {};
     let originalPricePresent = false, jsonLdProductFound = false;
     function remember(kind, value, source, replace = false) {
         if (kind === 'product' && value.priceWhenNew !== undefined && value.priceWhenNew !== null) originalPricePresent = true;
         if (replace || !(kind in data)) { data[kind] = value; sources[kind] = source; }
     }
-    $('script').each((_, node) => {
-        const script = $(node), raw = script.html() ?? '', id = script.attr('id') ?? '', type = script.attr('type') ?? '';
-        if (!['application/json', 'application/ld+json'].includes(type) && id !== '__NUXT_DATA__') return;
-        const source = id === '__NUXT_DATA__' ? 'nuxt' : type === 'application/ld+json' ? 'json-ld' : 'embedded-json';
-        const entry = { id, type, format: source, length: [...raw].length }; inventory.push(entry);
+    for (const { entry, parsed } of scripts) {
+        const { id, type, format: source } = entry; inventory.push(entry);
+        if (entry.parseError) continue;
         try {
-            let parsed = JSON.parse(raw);
-            if (id === '__NUXT_DATA__') parsed = decode(parsed);
             if (id === 'captured-commercial-data') {
                 if (parsed?.productId === input.productId && record(parsed.data))
                     for (const kind of ['product', 'pickers', 'specifications'])
@@ -163,7 +199,7 @@ export function extractHtml(html, input, responses = {}) {
                 }
             } else for (const [kind, value] of Object.entries(findCommerce(parsed, input.productId))) remember(kind, value, source);
         } catch { entry.parseError = true; }
-    });
+    }
     for (const kind of ['product', 'pickers', 'specifications'])
         if (record(responses[kind])) remember(kind, responses[kind], 'page-generated-json', true);
     const result = transform(input, data, fallback);

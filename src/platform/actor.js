@@ -110,6 +110,8 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
         metadata.executionMode = state.executionMode; metadata.extractionPerformed = state.extractionPerformed; metadata.status = state.status;
         event('PRECIO_VERIFICADO', metadata.priceVerification);
         event('PESO', { valueKg: metadata.weightNormalization.valueKg, source: metadata.weightNormalization.source,
+            roundedValueKg: metadata.weightNormalization.roundedValueKg,
+            roundingWarning: metadata.weightNormalization.roundingWarning ?? null,
             reason: metadata.weightNormalization.reason, kind: 'physical_product', shippingWeightKg: null });
         event('CAMPOS_ENCONTRADOS', { fields: metadata.sourceDiagnostics.foundFields });
         event('DATOS_FALTANTES', { fields: missing });

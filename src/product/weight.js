@@ -56,6 +56,12 @@ export function productIdentity(product, specs) {
     }
     return { brand, model, productType };
 }
+export function roundWeightKg(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return { value: null, warning: null };
+    const rounded = Math.round((value + Number.EPSILON) * 100) / 100;
+    return rounded === 0 ? { value: null, warning: 'POSITIVE_WEIGHT_BELOW_TWO_DECIMAL_PRECISION' }
+        : { value: rounded, warning: null };
+}
 export function productWeight(product, specifications) {
     const { brand, model, productType } = productIdentity(product, specifications);
     const candidates = [], excludedShippingValues = [];
@@ -82,5 +88,8 @@ export function productWeight(product, specifications) {
                 source: 'backmarket.technical_specifications', sourceValue: valid[0].raw, valueKg: valid[0].candidateKg });
         } else metadata.reason = 'CONFLICTING_OR_SUSPICIOUS_PUBLISHED_WEIGHT';
     }
-    return { weight: metadata.valueKg === null ? null : { value: metadata.valueKg, unit: 'kg' }, metadata };
+    const rounded = roundWeightKg(metadata.valueKg);
+    metadata.roundedValueKg = rounded.value;
+    if (rounded.warning) metadata.roundingWarning = rounded.warning;
+    return { weight: rounded.value === null ? null : { value: rounded.value, unit: 'kg' }, metadata };
 }

@@ -20,7 +20,7 @@ src/
 
 ## Input
 
-El Actor procesa una URL HTTPS de `www.backmarket.com/en-us/p/...`. Conserva los parametros comerciales `l` y `offerType` y comprueba el UUID, la oferta y el precio seleccionado.
+El Actor procesa una URL HTTPS de `www.backmarket.com/en-us/p/...`, con UUID o con una identidad explicita verificable en el documento. Conserva la URL completa, incluidos `l`, `offerType`, parametros picker adicionales y fragmentos. No se asume que omitir `closestPickerConfig` o `pickerClicked` sea comercialmente equivalente: se conservan y los parametros de consulta se comparan despues de las redirecciones. La identidad y la oferta se validan con los datos recibidos.
 
 ```json
 {
@@ -43,6 +43,12 @@ El Actor guarda un registro por URL con exactamente estas once claves:
 `url`, `title`, `price`, `productLadderPrices`, `moq`, `weight`, `dimensions`, `images`, `characteristics`, `variations`, `productId`.
 
 El precio solo se guarda si la oferta seleccionada se puede verificar contra el producto solicitado. Si falta evidencia o hay datos secundarios incompletos, el estado puede ser `partial` o `error`; el extractor no completa valores ausentes con datos inventados.
+
+Las condiciones se representan en `variations`, dentro del grupo `grades` (o el identificador de condiciones recibido), conservando las etiquetas y el orden originales. Cada `price` corresponde a su condicion. Solo se publica si pertenece al mismo UUID, sin conflictos de slug o seleccion conocida y con precio, moneda y disponibilidad comprobables. Un picker que cambia color o almacenamiento no acredita el precio de esa condicion para el producto solicitado y queda con `price: null`. `PRODUCT_METADATA.variantGroups[].options[]` conserva moneda, disponibilidad y motivo de verificacion; el contrato de variantes no tiene una clave de moneda. `productLadderPrices` permanece vacio porque representa precios por volumen, no condiciones.
+
+El peso se publica como numero en kg redondeado a dos decimales; el valor convertido original y su origen se conservan en metadata. Si un peso positivo quedara redondeado a cero, se devuelve `null` y se registra `POSITIVE_WEIGHT_BELOW_TWO_DECIMAL_PRECISION`.
+
+Para URLs cortas se consideran URL final, canonical y JSON-LD vinculados a la pagina, y registros Nuxt de producto o picker seleccionado asociados a su slug. La identidad debe ser unica y su oferta debe verificarse. Sin vinculo explicito se devuelve `SHORT_URL_IDENTITY_UNVERIFIED`; si hay identidades contradictorias, `SHORT_URL_IDENTITY_AMBIGUOUS`.
 
 ## Limitaciones
 
