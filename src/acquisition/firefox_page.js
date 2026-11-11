@@ -156,11 +156,11 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
                 challengeSeen = true;
                 if (challengeStarted !== null) return;
                 challengeStarted = performance.now();
-                event('DESAFIO_LOCAL', { resultado: 'espera_manual', mensaje: 'Página de verificación detectada. Esperando interacción manual (máximo 10 segundos).', url: safeUrl(page.url()) });
+                event('DESAFIO_LOCAL', { resultado: 'espera_manual', mensaje: 'Página de verificación detectada. Esperando interacción manual (máximo 15 segundos).', url: safeUrl(page.url()) });
                 challengeTimer = setTimeout(() => {
                     event('DESAFIO_LOCAL', { resultado: 'tiempo_agotado', segundos: (performance.now() - challengeStarted) / 1000, urlFinal: safeUrl(page.url()) }, 'warning');
                     fail('blocked', 'ACCESS_CHALLENGE', 'manual-verification');
-                }, Math.max(1, Math.min(10000, remaining() - 2000)));
+                }, Math.max(1, Math.min(15000, remaining() - 2000)));
             });
         }
         if (report.timings) report.timings.pageSetupSeconds = (performance.now() - pageStarted) / 1000;
