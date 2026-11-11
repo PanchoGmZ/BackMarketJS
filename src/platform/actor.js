@@ -1,6 +1,7 @@
 
 import { Actor } from 'apify';
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { parseInput } from './input.js';
 import { proxySettings, configureProxy } from '../acquisition/proxy.js';
 import { acquire as acquireFirefox } from '../acquisition/firefox.js';
@@ -38,7 +39,13 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
         });
         state.stage = 'input';
         if (rawInput !== undefined) await actor.setValue(process.env.ACTOR_INPUT_KEY || 'INPUT', rawInput);
-        input = parseInput(await bounded(actor.getInput(), budget.remaining(), null, 'input'));
+        const atHome = actor.isAtHome();
+        let actorInput = await bounded(actor.getInput(), budget.remaining(), null, 'input');
+        if (!atHome && actorInput == null) {
+            try { actorInput = JSON.parse((await readFile('input.json', 'utf8')).replace(/^\uFEFF/, '')); }
+            catch (error) { if (error.code !== 'ENOENT') throw error; }
+        }
+        input = parseInput(actorInput);
         budget.configure(input);
         state.transport = 'firefox';
         event('TRANSPORTE', { transport: 'firefox' });
@@ -46,19 +53,19 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
         state.executionMode = 'live';
         state.timeBudget = { processSeconds: budget.total / 1000, acquisitionSeconds: budget.acquisition / 1000, workSeconds: budget.work / 1000 };
         workTimer = setTimeout(() => controller.abort(), budget.remaining());
-        const settings = proxySettings(input);
+        const settings = atHome ? proxySettings(input) : { enabled: false, groups: [], country: null, mode: 'direct', sessionMode: null };
         state.proxy = { ...settings, status: settings.enabled ? 'pending' : 'disabled', connected: null, documentRequestSucceeded: null };
         await actor.setValue('RUN_STATE', state);
         event('LIMITES', { ...state.timeBudget, diagnosticMode: input.diagnosticMode });
         state.stage = 'proxy-setup';
-        const proxy = await timed('proxySetup', () => bounded(proxyFn(actor, settings), Math.min(10000, budget.remaining()), controller.signal, 'proxy-setup'));
+        const proxy = atHome ? await timed('proxySetup', () => bounded(proxyFn(actor, settings), Math.min(10000, budget.remaining()), controller.signal, 'proxy-setup')) : null;
         if (settings.enabled) state.proxy.status = 'configured';
         event('PROXY', { enabled: settings.enabled, mode: settings.mode, groups: settings.groups,
             country: settings.country, status: state.proxy.status, connected: null });
         state.stage = 'acquisition';
         let acquisitionResult;
         try {
-            acquisitionResult = await timed('acquisition', () => acquireFn(input, { proxy, proxyMode: settings.mode, budget, signal: controller.signal }));
+            acquisitionResult = await timed('acquisition', () => acquireFn(input, { proxy, proxyMode: settings.mode, budget, signal: controller.signal, ...(atHome ? {} : { localDirect: true }) }));
         } finally {
             event('TIEMPO_ADQUISICION', { transport: 'firefox', seconds: state.timings.acquisition });
         }

@@ -40,7 +40,7 @@ function proxyBridgeNavigationFailure(diagnosis) {
     return null;
 }
 async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budget, signal, browserType = firefox,
-    attemptNumber = 1, proxyBridge = false } = {}) {
+    attemptNumber = 1, proxyBridge = false, localDirect = false } = {}) {
     const started = performance.now(), remaining = () => Math.min(budget.remaining(budget.acquisition), budget.remaining());
     const tlsVerified = proxyMode !== 'unblocker';
     const fastMode = input.firefoxFastMode === true;
@@ -123,7 +123,7 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
     }
     let monitor;
     try {
-        const launch = browserType.launch({ headless: process.env.APIFY_IS_AT_HOME === '1' || process.platform !== 'win32',
+        const launch = browserType.launch({ headless: localDirect ? false : process.env.APIFY_IS_AT_HOME === '1' || process.platform !== 'win32',
             timeout: Math.max(1, remaining() - 2000), ...(proxy ? { proxy } : {}) });
         launch.then(b => { if (closing) b.close().catch(() => {}); }, () => {});
         browser = await bounded(launch, remaining() - 2000, signal, 'browser-start');

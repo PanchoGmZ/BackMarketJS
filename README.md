@@ -36,6 +36,10 @@ Apify UNBLOCKER viene seleccionado en `proxyConfiguration`. La cuenta debe tener
 
 En el Actor existente de Apify, actualiza el codigo desde este repositorio y crea un build desde la raiz. Docker instala Firefox y sus dependencias Linux. Configura la URL, confirma la autorizacion del proxy y ejecuta el Actor. No hace falta crear otro Actor ni seleccionar un navegador.
 
+## Ejecucion local en Windows
+
+Instala las dependencias con `npm ci` y Firefox con `npx playwright install firefox`. Crea `input.json` en la raiz con `{"url":"https://www.backmarket.com/en-us/p/switch-lite"}` y ejecuta `apify run` desde PowerShell. Se abre Firefox visible con conexion directa. El archivo local se usa cuando no hay input explicito del SDK y no se utiliza en Apify Cloud. Los resultados se guardan en `storage/`. Si el sitio muestra un desafio o rechaza el acceso, el Actor termina con un diagnostico.
+
 ## Dataset
 
 El Actor guarda un registro por URL con exactamente estas once claves:
