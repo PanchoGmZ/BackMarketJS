@@ -225,8 +225,13 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
             const bridgeFailure = proxyBridge ? proxyChainFailure(status, response.statusText()) : null;
             if (manualAllowed && doc && manualChallengeUrl(response.url())) challengeSeen = true;
             const allowManualResponse = manualAllowed && ((doc && (manualChallengeUrl(response.url()) || (location && manualChallengeUrl(new URL(location, response.url()).href)))) || (challengeSeen && category === 'protection'));
+            // A verification document may itself be served with HTTP 403. Let
+            // Firefox display only that HTML document for manual interaction.
+            const manualChallengeDocument = manualAllowed && doc && status === 403
+                && manualChallengeUrl(response.url()) && /\btext\/html\b/i.test(headers['content-type'] ?? '');
             const failure = bridgeFailure ? { status: 'error', code: bridgeFailure.code }
                 : proxyBridge && status === 407 ? { status: 'error', code: 'HTTP_407' }
+                : manualChallengeDocument ? null
                 : classifyHttp(category, status, allowManualResponse ? false : explicit);
             if (!doc && !kind && !explicit && status < 400) return;
             const item = { url: safeUrl(response.url()), category, httpStatus: status, contentType: headers['content-type'] ?? '',
@@ -244,7 +249,7 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
                 fail(failure.status, failure.code, bridgeFailure ? 'proxy-bridge' : doc ? 'navigation' : 'commercial-response');
                 return;
             }
-            if (status >= 400) {
+            if (status >= 400 && !manualChallengeDocument) {
                 report.resourceErrors.push(item);
                 event(category === 'optional' ? 'RECURSO_OPCIONAL' : 'RECURSO_SECUNDARIO', { status, category }, 'warning');
                 if (category === 'optional') deniedOptional.add(url.origin + url.pathname);
