@@ -58,6 +58,11 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
         passwordProvided: proxyBridge ? false : Boolean(proxy?.password),
         credentialBinding: proxyBridge ? 'proxy-chain-loopback' : proxy ? 'playwright-launch-fields' : 'none' };
     let browser, context, page, html = '', accepted = false, closing = false;
+    const manualAllowed = localDirect && !proxy && proxyMode === 'direct';
+    let challengeSeen = false, challengeStarted = null, challengeTimer;
+    const manualChallengeUrl = value => {
+        try { const u = new URL(value); return u.origin === origin && /^\/testchallengepage\/?$/i.test(u.pathname); } catch { return false; }
+    };
     const responses = {}, tasks = new Set(), ready = deferred(), stopped = deferred();
     const mainDocumentRead = deferred();
     let mainDocumentTask = null, deniedOptional = new Set(), navigationStarted = null;
@@ -73,6 +78,8 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
         const prepareStarted = report.timings ? performance.now() : null;
         try {
             if (report.error || accepted) return;
+            if (challengeSeen && (manualChallengeUrl(url) || new URL(url).origin !== origin || !/^\/en-us\/p\//i.test(new URL(url).pathname)
+                || !['selectedOffer', 'pickerGroups', 'specifications'].every(k => value.includes(k)))) return;
             const doc = report.requests.filter(r => r.category === 'document').at(-1);
             if (!doc || doc.httpStatus !== 200 || !doc.contentType.includes('text/html')) return;
             if (typeof value !== 'string' || Buffer.byteLength(value) > input.maxHtmlBytes) { fail('partial', 'HTML_TOO_LARGE'); return; }
@@ -81,6 +88,7 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
             report.pageSelection = selectionState(input.url, url);
             report.htmlReadySeconds = (performance.now() - started) / 1000;
             event('HTML_LISTO', { bytes: Buffer.byteLength(value), source, commercialValidationPending: true });
+            if (challengeSeen) event('DESAFIO_LOCAL', { resultado: 'verificacion_completada', segundos: challengeStarted === null ? null : (performance.now() - challengeStarted) / 1000, urlFinal: safeUrl(url) });
             ready.resolve();
         } finally {
             if (report.timings) report.timings.htmlPreparationSeconds += (performance.now() - prepareStarted) / 1000;
@@ -106,6 +114,7 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
                 if (valid) responses[kind] = obj;
             } else {
                 const document = raw.toString('utf8');
+                if (manualAllowed && manualChallengeUrl(response.url())) return;
                 if (visibleChallenge(document)) { fail('blocked', 'ACCESS_CHALLENGE', 'html-validation'); return; }
                 if ((input.productId === null || document.toLowerCase().includes(input.productId))
                     && ['selectedOffer', 'pickerGroups', 'specifications'].every(k => document.includes(k)))
@@ -136,6 +145,24 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
         event('TLS', { transport: 'firefox', verified: tlsVerified });
         const pageStarted = performance.now();
         page = await context.newPage();
+        if (manualAllowed) {
+            page.on('close', () => { if (!closing && challengeSeen && !accepted) fail('blocked', 'ACCESS_CHALLENGE', 'browser-closed'); });
+            page.on('domcontentloaded', () => {
+                if (challengeSeen && !manualChallengeUrl(page.url()) && !report.error && !accepted) {
+                    const task = page.content().then(document => offerHtml(document, 'rendered-dom-after-verification', page.url())).catch(() => {});
+                    tasks.add(task); task.finally(() => tasks.delete(task));
+                }
+                if (!manualChallengeUrl(page.url()) || report.error || accepted) return;
+                challengeSeen = true;
+                if (challengeStarted !== null) return;
+                challengeStarted = performance.now();
+                event('DESAFIO_LOCAL', { resultado: 'espera_manual', mensaje: 'Página de verificación detectada. Esperando interacción manual (máximo 10 segundos).', url: safeUrl(page.url()) });
+                challengeTimer = setTimeout(() => {
+                    event('DESAFIO_LOCAL', { resultado: 'tiempo_agotado', segundos: (performance.now() - challengeStarted) / 1000, urlFinal: safeUrl(page.url()) }, 'warning');
+                    fail('blocked', 'ACCESS_CHALLENGE', 'manual-verification');
+                }, Math.max(1, Math.min(10000, remaining() - 2000)));
+            });
+        }
         if (report.timings) report.timings.pageSetupSeconds = (performance.now() - pageStarted) / 1000;
         if (report.timings) page.on('domcontentloaded', () => {
             if (report.timings.domContentLoadedSeconds === null)
@@ -154,7 +181,7 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
             }
             if (deniedOptional.has(url.origin + url.pathname)) return route.abort();
             if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
-                if (challengeUrl(request.url())) { fail('blocked', 'ACCESS_CHALLENGE', 'redirect'); return route.abort(); }
+                if (challengeUrl(request.url()) && !(manualAllowed && manualChallengeUrl(request.url()))) { fail('blocked', 'ACCESS_CHALLENGE', 'redirect'); return route.abort(); }
                 if (url.origin !== origin) { fail('partial', 'UNEXPECTED_REDIRECT', 'redirect'); return route.abort(); }
             }
             return route.continue();
@@ -188,6 +215,7 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
             const location = headers.location;
             if (location && [301,302,303,307,308].includes(status)) {
                 const target = new URL(location, response.url()).href;
+                if (manualAllowed && doc && manualChallengeUrl(target)) challengeSeen = true;
                 report.redirects.push({ sourceUrl: safeUrl(response.url()), targetUrl: safeUrl(target), httpStatus: status,
                     type: challengeUrl(target) ? 'verification' : 'normal', cfRay: headers['cf-ray'] ?? null });
                 event('REDIRECCION', report.redirects.at(-1));
@@ -195,9 +223,11 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
             const explicit = url.origin === origin && (headers['cf-mitigated'] === 'challenge' || challengeUrl(response.url())
                 || (doc && location && challengeUrl(new URL(location, response.url()).href)));
             const bridgeFailure = proxyBridge ? proxyChainFailure(status, response.statusText()) : null;
+            if (manualAllowed && doc && manualChallengeUrl(response.url())) challengeSeen = true;
+            const allowManualResponse = manualAllowed && ((doc && (manualChallengeUrl(response.url()) || (location && manualChallengeUrl(new URL(location, response.url()).href)))) || (challengeSeen && category === 'protection'));
             const failure = bridgeFailure ? { status: 'error', code: bridgeFailure.code }
                 : proxyBridge && status === 407 ? { status: 'error', code: 'HTTP_407' }
-                : classifyHttp(category, status, explicit);
+                : classifyHttp(category, status, allowManualResponse ? false : explicit);
             if (!doc && !kind && !explicit && status < 400) return;
             const item = { url: safeUrl(response.url()), category, httpStatus: status, contentType: headers['content-type'] ?? '',
                 contentLengthBytes: /^\d+$/.test(headers['content-length'] ?? '') ? Number(headers['content-length']) : null,
@@ -205,6 +235,7 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
                 ...(bridgeFailure ? { proxyBridgeFailure: bridgeFailure.category } : {}) };
             report.requests.push(item); event('HTTP', item);
             if (failure) {
+                if (challengeSeen && manualAllowed) event('DESAFIO_LOCAL', { resultado: 'acceso_denegado', codigo: failure.code, segundos: challengeStarted === null ? null : (performance.now() - challengeStarted) / 1000, urlFinal: safeUrl(response.url()) }, 'warning');
                 if (doc) mainDocumentRead.resolve(null);
                 report.cfRay = item.cfRay;
                 if (bridgeFailure)
@@ -238,6 +269,7 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
             .then(async () => {
                 if (report.timings) report.timings.navigationWaitSeconds = (performance.now() - navigationStarted) / 1000;
                 if (report.error || accepted) return;
+                if (manualAllowed && (challengeSeen || manualChallengeUrl(page.url()))) return;
                 if (fastMode) {
                     const documentTask = await bounded(Promise.race([
                         mainDocumentRead.promise,
@@ -256,6 +288,7 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
                 offerHtml(document, 'rendered-dom', page.url());
             }).catch(error => {
                 if (accepted || closing || report.error) return;
+                if (manualAllowed && challengeSeen && !page.isClosed()) return;
                 const documents = report.requests.filter(r => r.category === 'document');
                 let diagnosis = navigationFailure(error, 'navigation', 'page.goto');
                 const bridgeFailure = proxyBridge ? proxyBridgeNavigationFailure(diagnosis) : null;
@@ -272,6 +305,8 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
                     bridgeFailure ? 'proxy-bridge' : 'navigation');
             });
         await bounded(Promise.race([ready.promise, stopped.promise, navigation]), remaining() - 2000, signal, 'navigation');
+        if (manualAllowed && challengeSeen && !accepted && !report.error)
+            await bounded(Promise.race([ready.promise, stopped.promise]), remaining() - 2000, signal, 'manual-verification');
         if (accepted && !report.error) {
             if (tasks.size) await Promise.race([Promise.allSettled([...tasks]), new Promise(r => setTimeout(r, Math.min(200, remaining())))]);
             if (!report.error) report.status = 'received';
@@ -282,7 +317,7 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
             fail(error?.status ?? 'error', report.navigationError.code, report.stage);
         }
     } finally {
-        closing = true; clearInterval(monitor); report.stage = 'browser-close';
+        closing = true; clearInterval(monitor); clearTimeout(challengeTimer); report.stage = 'browser-close';
         const startClose = performance.now();
         if (browser) try { await bounded(browser.close(), 2000, null, 'browser-close'); report.browserClosed = true; } catch { report.closeError = 'BROWSER_CLOSE_TIMEOUT'; }
         report.closeSeconds = (performance.now() - startClose) / 1000;
