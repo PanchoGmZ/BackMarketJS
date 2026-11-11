@@ -18,6 +18,7 @@ function emptyDiagnostics(input, reason) {
         selectedOfferUuidFound: false,
         priceVerified: false,
         evidenceSources: [],
+        pageProductUuidFound: false,
         finalUrlProductUuidFound: false,
         finalUrlSlugMatchesRequested: false,
         redirectFromRequestedVerified: false,
@@ -57,7 +58,8 @@ export function resolveShortIdentity(html, input, document = null, roots = []) {
     const slugs = new Set([requested.slug.toLowerCase(),
         ...(finalUrlSlugMatchesRequested || redirectFromRequestedVerified ? [final.slug.toLowerCase()] : [])]);
     const candidates = new Map();
-    let selectedProductFound = false, selectedOfferFound = false, pagePickerGroups = 0, nuxtPageStateFound = false;
+    let selectedProductFound = false, selectedOfferFound = false, pagePickerGroups = 0;
+    let nuxtPageStateFound = false, pageProductUuidFound = false, pagePickerStateLinked = false;
     const sources = new Set();
     function add(id, source, kind = null) {
         if (typeof id !== 'string' || !UUID_RE.test(id)) return;
@@ -135,7 +137,17 @@ export function resolveShortIdentity(html, input, document = null, roots = []) {
         if (linkedHere) nuxtPageStateFound = true;
         if (bound && Array.isArray(node.pickerGroups)) pagePickerGroups = Math.max(pagePickerGroups, node.pickerGroups.length);
 
+        // Back Market's series payload keeps MasterPP, pp-product and
+        // pp-pickers in sibling entries under Nuxt data. Link only the pickers
+        // store when the same data object contains an entry for this page slug.
+        const pageDataContainer = Object.values(node).some(child => record(child)
+            && typeof child.slug === 'string' && slugs.has(child.slug.toLowerCase()));
+
         const productRecord = record(node.titles) && Array.isArray(node.images);
+        if (linkedHere && typeof node.productId === 'string') {
+            pageProductUuidFound ||= UUID_RE.test(node.productId);
+            add(node.productId, 'nuxt-page-linked-product');
+        }
         if (linkedHere && productRecord) add(node.productId, 'nuxt-page-product');
         if (bound && node.selected === true && (node.productId || node.parameters || node.label || node.slug)) {
             selectedProductFound = true; sources.add('nuxt-selected-picker-option');
@@ -161,7 +173,11 @@ export function resolveShortIdentity(html, input, document = null, roots = []) {
             selectedOfferFound = true; sources.add('nuxt-selected-offer');
             if (selectedOffer.productId) add(selectedOffer.productId, 'nuxt-selected-offer', 'offer');
         }
-        for (const child of Object.values(node)) walk(child, bound, depth + 1);
+        for (const [key, child] of Object.entries(node)) {
+            const siblingPickers = pageDataContainer && /^pp-pickers(?::|-|$)/i.test(key);
+            if (siblingPickers) pagePickerStateLinked = true;
+            walk(child, bound || siblingPickers, depth + 1);
+        }
     }
     for (const root of roots) walk(root);
 
@@ -178,6 +194,8 @@ export function resolveShortIdentity(html, input, document = null, roots = []) {
         selectedOfferUuidFound: [...candidates.values()].some(value => value.has('nuxt-selected-offer')),
         priceVerified: false,
         evidenceSources: [...sources].slice(0, 12),
+        pageProductUuidFound,
+        pagePickerStateLinked,
         canonicalPageLinks: canonicalLinks.slice(0, 5),
         canonicalLinkFound,
         canonicalPageLinkCount: canonicalLinks.filter(link => link.linkedToRequestedPage).length,
