@@ -14,3 +14,9 @@ reports
 *.pfx
 cookies*
 browser-profile*
+*token*
+*credential*
+*secret*
+*.log
+*.tmp
+playwright/.auth

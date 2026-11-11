@@ -40,6 +40,8 @@ En el Actor existente de Apify, actualiza el codigo desde este repositorio y cre
 
 Instala las dependencias con `npm ci` y Firefox con `npx playwright install firefox`. Crea `input.json` en la raiz con `{"url":"https://www.backmarket.com/en-us/p/switch-lite"}` y ejecuta `apify run` desde PowerShell. Se abre Firefox visible con conexion directa. El archivo local se usa cuando no hay input explicito del SDK y no se utiliza en Apify Cloud. Los resultados se guardan en `storage/`. Si el sitio muestra un desafio o rechaza el acceso, el Actor termina con un diagnostico.
 
+La espera manual local de la pagina de verificacion es de 10 segundos por defecto, limitada tambien por el presupuesto restante. Para utilizar los 30 segundos de la configuracion local anterior, ejecuta `$env:BACKMARKET_LOCAL_CHALLENGE_SECONDS = '30'` en PowerShell antes de `apify run`. Se admiten enteros entre 1 y 120; valores invalidos usan 10. La opcion solo afecta al modo local directo.
+
 ## Dataset
 
 El Actor guarda un registro por URL con exactamente estas once claves:

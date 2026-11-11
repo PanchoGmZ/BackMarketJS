@@ -6,6 +6,10 @@ import { classifyHttp, event, navigationFailure } from '../shared/diagnostics.js
 import { challengeUrl, safeUrl, selectionState } from '../platform/input.js';
 
 function deferred() { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; }
+export function localChallengeSeconds(env = process.env) {
+    const value = Number(env.BACKMARKET_LOCAL_CHALLENGE_SECONDS ?? 10);
+    return Number.isInteger(value) && value >= 1 && value <= 120 ? value : 10;
+}
 function visibleChallenge(html) {
     const $ = load(html), title = $('title').text();
     $('script,style,noscript').remove();
@@ -65,7 +69,7 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
     };
     const responses = {}, tasks = new Set(), ready = deferred(), stopped = deferred();
     const mainDocumentRead = deferred();
-    let mainDocumentTask = null, deniedOptional = new Set(), navigationStarted = null;
+    let deniedOptional = new Set(), navigationStarted = null;
     const origin = new URL(input.url).origin, base = '/product-page/products/' + input.productId;
     const paths = input.productId === null ? new Map()
         : new Map([[base, 'product'], [base + '/pickers', 'pickers'], [base + '/technical_specifications', 'specifications']]);
@@ -156,11 +160,12 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
                 challengeSeen = true;
                 if (challengeStarted !== null) return;
                 challengeStarted = performance.now();
-                event('DESAFIO_LOCAL', { resultado: 'espera_manual', mensaje: 'Página de verificación detectada. Esperando interacción manual (máximo 25 segundos).', url: safeUrl(page.url()) });
+                const maxSeconds = localChallengeSeconds();
+                event('DESAFIO_LOCAL', { resultado: 'espera_manual', mensaje: `Página de verificación detectada. Esperando interacción manual (máximo ${maxSeconds} segundos).`, url: safeUrl(page.url()) });
                 challengeTimer = setTimeout(() => {
                     event('DESAFIO_LOCAL', { resultado: 'tiempo_agotado', segundos: (performance.now() - challengeStarted) / 1000, urlFinal: safeUrl(page.url()) }, 'warning');
                     fail('blocked', 'ACCESS_CHALLENGE', 'manual-verification');
-                }, Math.max(1, Math.min(25000, remaining() - 2000)));
+                }, Math.max(1, Math.min(maxSeconds * 1000, remaining() - 2000)));
             });
         }
         if (report.timings) report.timings.pageSetupSeconds = (performance.now() - pageStarted) / 1000;
@@ -257,7 +262,7 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
             if (doc && status !== 200 && ![301,302,303,307,308].includes(status)) mainDocumentRead.resolve(null);
             if (status === 200 && (doc || kind)) {
                 const task = readResponse(response, item, kind);
-                if (doc) { mainDocumentTask = task; mainDocumentRead.resolve(task); }
+                if (doc) mainDocumentRead.resolve(task);
                 tasks.add(task); task.finally(() => tasks.delete(task));
             }
         });
