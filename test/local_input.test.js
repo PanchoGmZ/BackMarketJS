@@ -38,98 +38,78 @@ async function withTempProject(fn) {
     try { await fn(root); } finally { await rm(root, { recursive: true, force: true }); }
 }
 
-test('input.json raiz prevalece sobre Storage y se conserva entre ejecuciones', async () => {
+test('solo usa el INPUT canonico de Storage e ignora la raiz y los Inputs CLI', async () => {
     await withTempProject(async root => {
-        const privateInput = { url: rootUrl };
-        const oldStorageInput = { url: 'https://www.backmarket.com/en-us/p/iphone-15-128-gb-black-unlocked/c8fc0d62-5daa-48f0-ba1e-4c41b4612249' };
-        await writeFile(join(root, 'input.template.json'), JSON.stringify(privateInput), 'utf8');
-        await writeFile(join(root, 'input.json'), JSON.stringify(privateInput), 'utf8');
+        const storageInput = { url: rootUrl };
+        const otherInput = { url: cliUrl };
+        await writeFile(join(root, 'input.template.json'), JSON.stringify({ url: cloudUrl }), 'utf8');
+        await writeFile(join(root, 'input.json'), JSON.stringify(otherInput), 'utf8');
         const storageInputPath = join(root, 'storage', 'key_value_stores', 'default', 'INPUT.json');
         await mkdir(join(root, 'storage', 'key_value_stores', 'default'), { recursive: true });
-        await writeFile(storageInputPath, JSON.stringify(oldStorageInput), 'utf8');
-        await writeFile(join(root, 'storage', 'key_value_stores', 'default', '__CLI_INPUT.json'), JSON.stringify(oldStorageInput), 'utf8');
+        await writeFile(storageInputPath, JSON.stringify(storageInput), 'utf8');
+        await writeFile(join(root, 'storage', 'key_value_stores', 'default', '__CLI_INPUT.json'), JSON.stringify(otherInput), 'utf8');
 
-        const selected = await loadLocalInput({ root, env: {
-            ACTOR_INPUT_KEY: '__CLI_INPUT', APIFY_INPUT_KEY: '__CLI_INPUT', CRAWLEE_INPUT_KEY: '__CLI_INPUT',
-        }, isCloud: false });
-        assert.equal(selected.origin, 'input.json');
-        assert.deepEqual(selected.rawInput, privateInput);
-        assert.deepEqual(JSON.parse(await readFile(storageInputPath, 'utf8')), oldStorageInput);
-
-        await writeFile(join(root, 'input.json'), JSON.stringify({ url: cliUrl }), 'utf8');
-        const nextRun = await loadLocalInput({ root, env: { APIFY_INPUT_KEY: 'INPUT' }, isCloud: false });
-        assert.equal(nextRun.rawInput.url, cliUrl);
-    });
-});
-
-test('si falta input.json se crea una vez desde la plantilla sin sobrescribirlo', async () => {
-    await withTempProject(async root => {
-        const template = { url: rootUrl };
-        const edited = { url: cliUrl };
-        await writeFile(join(root, 'input.template.json'), JSON.stringify(template), 'utf8');
-        const first = await loadLocalInput({ root, env: {}, isCloud: false });
-        assert.equal(first.origin, 'input.json');
-        assert.deepEqual(first.rawInput, template);
-        assert.deepEqual(JSON.parse(await readFile(join(root, 'input.json'), 'utf8')), template);
-
-        await writeFile(join(root, 'input.json'), JSON.stringify(edited), 'utf8');
-        const second = await loadLocalInput({ root, env: {}, isCloud: false });
-        assert.deepEqual(second.rawInput, edited);
-        assert.deepEqual(JSON.parse(await readFile(join(root, 'input.json'), 'utf8')), edited);
-    });
-});
-
-test('Apify CLI explicito conserva prioridad y no crea input.json local', async () => {
-    await withTempProject(async root => {
-        await writeFile(join(root, 'input.template.json'), JSON.stringify({ url: rootUrl }), 'utf8');
         const cliEnv = {
             ACTOR_INPUT_KEY: '__CLI_INPUT', APIFY_INPUT_KEY: '__CLI_INPUT', CRAWLEE_INPUT_KEY: '__CLI_INPUT',
         };
-        const selected = await loadLocalInput({ root, env: cliEnv, isCloud: false });
-        assert.equal(selected.origin, 'apify-cli');
-        assert.equal(selected.rawInput, undefined);
-        await assert.rejects(readFile(join(root, 'input.json'), 'utf8'), { code: 'ENOENT' });
+        const selected = await loadLocalInput({ root, isCloud: false });
+        assert.equal(selected.origin, 'storage/key_value_stores/default/INPUT.json');
+        assert.deepEqual(selected.rawInput, storageInput);
+        assert.deepEqual(JSON.parse(await readFile(storageInputPath, 'utf8')), storageInput);
+
+        const ignoredCliInput = await loadLocalInput({ root, env: cliEnv, isCloud: false });
+        assert.equal(ignoredCliInput.origin, selected.origin);
+        assert.deepEqual(ignoredCliInput.rawInput, storageInput);
+        assert.deepEqual(JSON.parse(await readFile(join(root, 'input.json'), 'utf8')), otherInput);
     });
 });
 
-test('la clave temporal de CLI que solo replica Storage no desplaza input.json', async () => {
+test('si falta el INPUT canonico, falla sin leer otras fuentes ni crear archivos', async () => {
     await withTempProject(async root => {
-        const oldInput = { url: 'https://www.backmarket.com/en-us/p/iphone-15' };
+        const storageInputPath = join(root, 'storage', 'key_value_stores', 'default', 'INPUT.json');
+        await writeFile(join(root, 'input.template.json'), JSON.stringify({ url: cloudUrl }), 'utf8');
+        await writeFile(join(root, 'input.json'), JSON.stringify({ url: cliUrl }), 'utf8');
+        await assert.rejects(loadLocalInput({ root, isCloud: false }), error => error.code === 'LOCAL_STORAGE_INPUT_MISSING');
+        await assert.rejects(readFile(storageInputPath, 'utf8'), { code: 'ENOENT' });
+    });
+});
+
+test('un INPUT vacio no se sustituye por la plantilla ni por input.json', async () => {
+    await withTempProject(async root => {
+        const emptyInput = {};
         await writeFile(join(root, 'input.template.json'), JSON.stringify({ url: rootUrl }), 'utf8');
+        await writeFile(join(root, 'input.json'), JSON.stringify({ url: cliUrl }), 'utf8');
         const store = join(root, 'storage', 'key_value_stores', 'default');
         await mkdir(store, { recursive: true });
-        await writeFile(join(store, 'INPUT.json'), JSON.stringify(oldInput), 'utf8');
-        await writeFile(join(store, '__CLI_INPUT.json'), JSON.stringify(oldInput), 'utf8');
+        await writeFile(join(store, 'INPUT.json'), JSON.stringify(emptyInput), 'utf8');
 
-        const selected = await loadLocalInput({ root, env: { APIFY_INPUT_KEY: '__CLI_INPUT' }, isCloud: false });
-        assert.equal(selected.origin, 'input.json');
-        assert.deepEqual(selected.rawInput, { url: rootUrl });
+        const selected = await loadLocalInput({ root, isCloud: false });
+        assert.equal(selected.origin, 'storage/key_value_stores/default/INPUT.json');
+        assert.deepEqual(selected.rawInput, emptyInput);
+        assert.deepEqual(JSON.parse(await readFile(join(store, 'INPUT.json'), 'utf8')), emptyInput);
     });
 });
 
-test('un Input CLI diferente del Input antiguo conserva prioridad', async () => {
+test('el Input de CLI no desplaza el registro INPUT de Storage aunque sea distinto', async () => {
     await withTempProject(async root => {
-        const oldInput = { url: 'https://www.backmarket.com/en-us/p/iphone-15' };
-        const explicitInput = { url: cliUrl };
-        await writeFile(join(root, 'input.template.json'), JSON.stringify({ url: rootUrl }), 'utf8');
+        const storedInput = { url: rootUrl };
+        const cliInput = { url: cliUrl };
         const store = join(root, 'storage', 'key_value_stores', 'default');
         await mkdir(store, { recursive: true });
-        await writeFile(join(store, 'INPUT.json'), JSON.stringify(oldInput), 'utf8');
-        await writeFile(join(store, '__CLI_INPUT.json'), JSON.stringify(explicitInput), 'utf8');
+        await writeFile(join(store, 'INPUT.json'), JSON.stringify(storedInput), 'utf8');
+        await writeFile(join(store, '__CLI_INPUT.json'), JSON.stringify(cliInput), 'utf8');
 
         const selected = await loadLocalInput({ root, env: { APIFY_INPUT_KEY: '__CLI_INPUT' }, isCloud: false });
-        assert.equal(selected.origin, 'apify-cli');
-        assert.equal(selected.rawInput, undefined);
-        await assert.rejects(readFile(join(root, 'input.json'), 'utf8'), { code: 'ENOENT' });
+        assert.equal(selected.origin, 'storage/key_value_stores/default/INPUT.json');
+        assert.deepEqual(selected.rawInput, storedInput);
     });
 });
 
-test('Cloud no lee ni crea input.json local y runActor usa el Input oficial', async () => {
+test('Cloud no lee el Input de Storage y runActor usa el Input oficial', async () => {
     await withTempProject(async root => {
-        await writeFile(join(root, 'input.template.json'), JSON.stringify({ url: rootUrl }), 'utf8');
         const selection = await loadLocalInput({ root, env: {}, isCloud: true });
         assert.deepEqual(selection, { origin: 'apify', rawInput: undefined });
-        await assert.rejects(readFile(join(root, 'input.json'), 'utf8'), { code: 'ENOENT' });
+        await assert.rejects(readFile(join(root, 'storage', 'key_value_stores', 'default', 'INPUT.json'), 'utf8'), { code: 'ENOENT' });
 
         let acquiredUrl, proxyMode;
         const actor = testActor({ isAtHome: true, input: { url: cloudUrl } });
@@ -146,7 +126,7 @@ test('Cloud no lee ni crea input.json local y runActor usa el Input oficial', as
     });
 });
 
-test('runActor usa la URL local directa y registra solo el origen, sin leer Storage ni filtrar secretos', async () => {
+test('runActor usa el INPUT local canonico y registra el origen sin filtrar secretos', async () => {
     const messages = [];
     const original = log.info;
     log.info = (...args) => messages.push(args);
@@ -154,7 +134,7 @@ test('runActor usa la URL local directa y registra solo el origen, sin leer Stor
         let acquiredUrl, proxyMode;
         const staleStorageInput = { url: 'https://www.backmarket.com/en-us/p/iphone-15' };
         const actor = testActor({ input: staleStorageInput });
-        await runActor({ actor, rawInput: { url: rootUrl }, inputSource: 'input.json', env: credentials, budget: testBudget(),
+        await runActor({ actor, rawInput: { url: rootUrl }, inputSource: 'storage/key_value_stores/default/INPUT.json', env: credentials, budget: testBudget(),
             proxyFn: async () => { throw new Error('local execution must not create an Apify proxy'); },
             acquireFn: async (input, options) => {
                 acquiredUrl = input.url;
@@ -165,7 +145,7 @@ test('runActor usa la URL local directa y registra solo el origen, sin leer Stor
         assert.equal(acquiredUrl, rootUrl);
         assert.equal(proxyMode, 'local-external-proxy');
         assert.equal(actor.inputReads, 0);
-        assert.match(JSON.stringify(messages), /"origin":"input\.json"/);
+        assert.match(JSON.stringify(messages), /storage\/key_value_stores\/default\/INPUT\.json/);
         assert.doesNotMatch(JSON.stringify(messages), /test-secret=must-not-log|wu_732a50ce/);
     } finally {
         log.info = original;
@@ -176,7 +156,4 @@ test('esquema de Input existente sigue exponiendo solo url', async () => {
     const schema = JSON.parse(await readFile(new URL('../.actor/input_schema.json', import.meta.url), 'utf8'));
     assert.deepEqual(Object.keys(schema.properties), ['url']);
     assert.deepEqual(schema.required, ['url']);
-    const template = JSON.parse(await readFile(new URL('../input.template.json', import.meta.url), 'utf8'));
-    assert.deepEqual(Object.keys(template), ['url']);
-    assert.equal(template.url, rootUrl);
 });
