@@ -68,5 +68,7 @@ export function parseInput(raw, env = process.env) {
         || !Number.isInteger(maxMemoryMb) || maxMemoryMb < 256 || maxMemoryMb > 2048
         || !Number.isInteger(timeoutSeconds) || timeoutSeconds < 5 || (!value.diagnosticMode && timeoutSeconds > 48))
         throw new ExtractionError('INVALID_RESOURCE_LIMIT', 'input');
-    return { ...value, productId: identity.productId, maxHtmlBytes, maxMemoryMb, timeoutSeconds };
+    const normalized = { ...value };
+    delete normalized.proxyAccessAuthorized;
+    return { ...normalized, productId: identity.productId, maxHtmlBytes, maxMemoryMb, timeoutSeconds };
 }

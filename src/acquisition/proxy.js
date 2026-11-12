@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { ExtractionError, record } from '../shared/values.js';
 export function proxySettings(input) {
     const config = input.proxyConfiguration ?? { useApifyProxy: true, apifyProxyGroups: ['UNBLOCKER'] };
-    if (!record(config) || (input.proxyAccessAuthorized !== undefined && typeof input.proxyAccessAuthorized !== 'boolean')
+    if (!record(config)
         || Object.keys(config).some(k => !['useApifyProxy', 'apifyProxyGroups', 'apifyProxyCountry', 'proxyUrls'].includes(k)))
         throw new ExtractionError('INVALID_PROXY_CONFIGURATION', 'proxy-setup');
     if (config.proxyUrls !== undefined && (!Array.isArray(config.proxyUrls) || config.proxyUrls.length))

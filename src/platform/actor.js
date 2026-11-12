@@ -11,6 +11,11 @@ import { Budget, bounded } from '../shared/budget.js';
 import { event, navigationFailure } from '../shared/diagnostics.js';
 import { ExtractionError } from '../shared/values.js';
 
+const CLOUD_PROXY_CONFIGURATION = Object.freeze({
+    useApifyProxy: true,
+    apifyProxyGroups: Object.freeze(['UNBLOCKER']),
+});
+
 export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
     acquireFn = acquireFirefox, proxyFn = configureProxy } = {}) {
     const state = { source: 'backmarket', runtime: 'javascript', extractionMethod: 'nuxt',
@@ -54,7 +59,7 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
         state.timeBudget = { processSeconds: budget.total / 1000, acquisitionSeconds: budget.acquisition / 1000, workSeconds: budget.work / 1000 };
         workTimer = setTimeout(() => controller.abort(), budget.remaining());
         const settings = atHome
-            ? proxySettings({ ...input, proxyConfiguration: { useApifyProxy: true, apifyProxyGroups: ['UNBLOCKER'] } })
+            ? proxySettings({ proxyConfiguration: CLOUD_PROXY_CONFIGURATION })
             : { enabled: false, groups: [], country: null, mode: 'direct', sessionMode: null };
         state.proxy = { ...settings, status: settings.enabled ? 'pending' : 'disabled', connected: null, documentRequestSucceeded: null };
         await actor.setValue('RUN_STATE', state);

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { EventEmitter } from 'node:events';
 import { parseInput, selectionState } from '../src/platform/input.js';
-import { proxySettings } from '../src/acquisition/proxy.js';
+import { configureProxy, proxySettings } from '../src/acquisition/proxy.js';
 import { acquire } from '../src/acquisition/firefox.js';
 import { localChallengeSeconds } from '../src/acquisition/firefox_page.js';
 import { acquireOnce } from '../src/acquisition/firefox_page.js';
@@ -44,6 +44,7 @@ test('el esquema publico solo presenta url y acepta opciones antiguas por API', 
     assert.doesNotMatch('https://evil.example/en-us/p/ipad-air', publicUrlPattern);
     const legacy = parseInput({url, proxyAccessAuthorized: false, proxyConfiguration: {useApifyProxy: false}, outputFormat: 'reference1688', diagnosticMode: false});
     assert.equal(legacy.productId, uuid);
+    assert.equal(Object.hasOwn(legacy, 'proxyAccessAuthorized'), false);
 });
 test('URL requiere HTTPS y una ficha de Back Market', () => {
     for (const invalid of ['http://www.backmarket.com/en-us/p/ipad-air', 'https://evil.example/en-us/p/ipad-air', 'https://www.backmarket.com/en-us/search?q=ipad'])
@@ -86,17 +87,29 @@ test('desafío local 403 espera el límite y cierra sin HTML', async () => {
         assert.equal(closed,1);assert.ok(performance.now()-before>=900);
     } finally { if(previous===undefined) delete process.env.BACKMARKET_LOCAL_CHALLENGE_SECONDS; else process.env.BACKMARKET_LOCAL_CHALLENGE_SECONDS=previous; }
 });
-test('Actor Cloud y local seleccionan rutas distintas sin escribir Dataset en error', async () => {
+test('Cloud fuerza UNBLOCKER ante Input antiguo y local permanece directo', async () => {
+    const legacyInput = {url, proxyAccessAuthorized:false, proxyConfiguration:{useApifyProxy:false}};
     for (const home of [true,false]) {
-        let proxyCalls=0, options, writes=0;
-        const actor={isAtHome:()=>home,init:async()=>{},on:()=>{},setValue:async()=>{},getInput:async()=>({url,proxyAccessAuthorized:false,proxyConfiguration:{useApifyProxy:false}}),exit:async()=>{},pushData:async()=>{writes++;}};
-        let proxySettingsSeen;
-        const result=await runActor({actor,proxyFn:async(_actor,settings)=>{proxyCalls++;proxySettingsSeen=settings;return {};},acquireFn:async(_input,o)=>{options=o;return {acquisition:{status:'error',error:{code:'OFFLINE_TEST'},requests:[]}};}});
+        let proxyCalls=0, options, writes=0, settingsSeen;
+        const actor={isAtHome:()=>home,init:async()=>{},on:()=>{},setValue:async()=>{},getInput:async()=>legacyInput,exit:async()=>{},pushData:async()=>{writes++;}};
+        const result=await runActor({actor,proxyFn:async(_actor,settings)=>{proxyCalls++;settingsSeen=settings;return {};},acquireFn:async(_input,o)=>{options=o;return {acquisition:{status:'error',error:{code:'OFFLINE_TEST'},requests:[]}};}});
         assert.equal(proxyCalls,home?1:0); assert.equal(options.proxyMode,home?'unblocker':'direct');
-        if(home) assert.deepEqual(proxySettingsSeen.groups, ['UNBLOCKER']);
-        if(home) assert.equal(proxySettingsSeen.enabled, true);
+        if(home) assert.deepEqual(settingsSeen, {enabled:true,groups:['UNBLOCKER'],country:null,mode:'unblocker',sessionMode:'not-supported'});
         assert.equal(writes,0); assert.equal(result.state.status,'error');
     }
+});
+test('Cloud con solo url configura UNBLOCKER sin depender del Input', async () => {
+    let settingsSeen, options;
+    const actor={isAtHome:()=>true,init:async()=>{},on:()=>{},setValue:async()=>{},getInput:async()=>({url}),exit:async()=>{},pushData:async()=>{}};
+    const result=await runActor({actor,proxyFn:async(_actor,settings)=>{settingsSeen=settings;return {};},acquireFn:async(_input,value)=>{options=value;return {acquisition:{status:'error',error:{code:'OFFLINE_TEST'},requests:[]}};}});
+    assert.equal(settingsSeen.mode,'unblocker'); assert.deepEqual(settingsSeen.groups,['UNBLOCKER']);
+    assert.equal(options.proxyMode,'unblocker'); assert.equal(result.state.proxy.enabled,true);
+});
+test('fallo real de configuracion de Apify Proxy se conserva como diagnostico claro', async () => {
+    const settings=proxySettings(parseInput({url})); let received;
+    await assert.rejects(configureProxy({createProxyConfiguration:async value=>{received=value;return null;}},settings), {code:'APIFY_PROXY_GROUP_UNAVAILABLE'});
+    assert.deepEqual(received,{useApifyProxy:true,groups:['UNBLOCKER']});
+    await assert.rejects(configureProxy({createProxyConfiguration:async()=>{throw new Error('You do not have access to Apify proxy group UNBLOCKER');}},settings), {code:'APIFY_PROXY_GROUP_UNAVAILABLE'});
 });
 test('HTML real guardado conserva contrato cuando se proporciona', {skip:!process.env.AUDIT_HTML}, async () => {
     const html=await readFile(process.env.AUDIT_HTML,'utf8');
