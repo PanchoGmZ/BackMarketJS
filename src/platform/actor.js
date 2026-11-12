@@ -3,7 +3,7 @@ import { Actor } from 'apify';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { parseInput } from './input.js';
-import { proxySettings, configureProxy } from '../acquisition/proxy.js';
+import { proxySettings, configureProxy, localProxyConfiguration } from '../acquisition/proxy.js';
 import { acquire as acquireFirefox } from '../acquisition/firefox.js';
 import { extractHtml } from '../product/extraction.js';
 import { assertProduct } from '../product/contract.js';
@@ -17,7 +17,7 @@ const CLOUD_PROXY_CONFIGURATION = Object.freeze({
 });
 
 export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
-    acquireFn = acquireFirefox, proxyFn = configureProxy } = {}) {
+    acquireFn = acquireFirefox, proxyFn = configureProxy, env = process.env } = {}) {
     const state = { source: 'backmarket', runtime: 'javascript', extractionMethod: 'nuxt',
         runId: randomUUID(), startedAt: new Date().toISOString(), status: 'running',
         stage: 'actor-init', savedResults: 0, extractionPerformed: false, timings: {}, error: null };
@@ -58,14 +58,17 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
         state.executionMode = 'live';
         state.timeBudget = { processSeconds: budget.total / 1000, acquisitionSeconds: budget.acquisition / 1000, workSeconds: budget.work / 1000 };
         workTimer = setTimeout(() => controller.abort(), budget.remaining());
+        const localProxy = atHome ? null : localProxyConfiguration(env);
         const settings = atHome
             ? proxySettings({ proxyConfiguration: CLOUD_PROXY_CONFIGURATION })
-            : { enabled: false, groups: [], country: null, mode: 'direct', sessionMode: null };
+            : localProxy.settings;
         state.proxy = { ...settings, status: settings.enabled ? 'pending' : 'disabled', connected: null, documentRequestSucceeded: null };
         await actor.setValue('RUN_STATE', state);
         event('LIMITES', { ...state.timeBudget, diagnosticMode: input.diagnosticMode });
         state.stage = 'proxy-setup';
-        const proxy = atHome ? await timed('proxySetup', () => bounded(proxyFn(actor, settings), Math.min(10000, budget.remaining()), controller.signal, 'proxy-setup')) : null;
+        const proxy = atHome
+            ? await timed('proxySetup', () => bounded(proxyFn(actor, settings), Math.min(10000, budget.remaining()), controller.signal, 'proxy-setup'))
+            : localProxy.proxy;
         if (settings.enabled) state.proxy.status = 'configured';
         event('PROXY', { enabled: settings.enabled, mode: settings.mode, groups: settings.groups,
             country: settings.country, status: state.proxy.status, connected: null });

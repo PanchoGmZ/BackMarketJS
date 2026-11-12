@@ -8,6 +8,8 @@ reports/
 .env
 .env.*
 .env*
+.env.local
+!.env.local.example
 *.pem
 *.key
 *.p12

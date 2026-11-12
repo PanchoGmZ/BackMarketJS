@@ -6,7 +6,7 @@ Las extracciones rápidas observadas usaron Firefox normal y una sola navegació
 
 ## Arquitectura y camino crítico
 
-Cloud: SDK de Apify → configuración UNBLOCKER → puente local proxy-chain → Firefox/Playwright → respuesta HTML y posibles datos comerciales → parser Nuxt y validaciones → Dataset → cierre. Local: Firefox visible y conexión directa; el mismo parser y Dataset. Los límites y el cierre son parte del flujo, no operaciones opcionales.
+Cloud: SDK de Apify → configuración UNBLOCKER → puente local proxy-chain → Firefox/Playwright → respuesta HTML y posibles datos comerciales → parser Nuxt y validaciones → Dataset → cierre. Local sin credenciales Oxylabs: Firefox visible y conexión directa. Local con credenciales: Firefox headless → puente proxy-chain → Oxylabs Web Unblocker. Ambos modos locales usan el mismo parser, Dataset, límites y cierre.
 
 En modo normal `page.goto` usa `domcontentloaded`. En paralelo, el listener lee `response.body()` del documento; si el HTML contiene los indicadores comerciales, lo acepta y `Promise.race` puede continuar antes de terminar la espera de navegación. Esto no elimina la validación posterior ni garantiza que el cuerpo siempre esté completo. Si no sirve la respuesta se usa el DOM. Las esperas de tiempo máximo son límites, no pausas obligatorias; existe una espera de hasta 200 ms para tareas pendientes. El modo rápido `commit` y el bloqueo de imágenes/fuentes son opcionales, desactivados por defecto y no explican los ejemplos normales.
 

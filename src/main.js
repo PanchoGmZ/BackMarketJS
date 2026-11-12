@@ -1,8 +1,10 @@
 
 import { Budget } from './shared/budget.js';
+import { loadLocalEnvFile } from './platform/local_env.js';
 // Arm a process guard before importing the SDK, Cheerio or Playwright.
 const budget = new Budget();
 try {
+    loadLocalEnvFile();
     const { readFile, realpath } = await import('node:fs/promises');
     const { resolve, relative, isAbsolute } = await import('node:path');
     const root = await realpath(process.cwd());

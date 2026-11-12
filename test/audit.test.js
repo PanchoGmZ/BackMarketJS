@@ -64,11 +64,12 @@ test('precio y condiciones de la misma selección y once campos', () => {
     assert.equal(roundWeightKg(0.17009713875).value,0.17);
 });
 test('sin proxy local, una navegación y cierre en error', async () => {
-    let closed=0, navigations=0, bridge=0, launch;
+    let closed=0, navigations=0, bridge=0, launch, contextOptions;
     const page={on(){},route:async()=>{},mainFrame(){return {};},goto:async()=>{navigations++;throw Error('offline');}};
-    const browserType={launch:async opts=>{launch=opts;return {newContext:async()=>({newPage:async()=>page}),close:async()=>{closed++}};}};
+    const browserType={launch:async opts=>{launch=opts;return {newContext:async opts=>{contextOptions=opts;return {newPage:async()=>page};},close:async()=>{closed++}};}};
     const result=await acquire(parseInput({url}),{localDirect:true,browserType,budget:{acquisition:30000,remaining:()=>30000},anonymizeProxyFn:async()=>{bridge++;}});
     assert.equal(launch.headless,false); assert.equal(launch.proxy,undefined);
+    assert.equal(contextOptions.ignoreHTTPSErrors,false); assert.equal(result.acquisition.tlsVerified,true);
     assert.equal(bridge,0); assert.equal(navigations,1); assert.equal(closed,1); assert.equal(result.acquisition.status,'error');
 });
 test('desafío local 403 espera el límite y cierra sin HTML', async () => {

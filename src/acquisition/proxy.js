@@ -41,3 +41,38 @@ export async function configureProxy(actor, settings) {
         throw new ExtractionError('PROXY_CONFIGURATION_ERROR', 'proxy-setup');
     }
 }
+
+const DIRECT_LOCAL_SETTINGS = Object.freeze({ enabled: false, groups: [], country: null, mode: 'direct', sessionMode: null });
+const OXYLABS_HOST = 'unblock.oxylabs.io';
+const OXYLABS_PORT = '60000';
+
+export function localProxyConfiguration(env = process.env) {
+    const requestedMode = typeof env.BACKMARKET_LOCAL_PROXY_MODE === 'string'
+        ? env.BACKMARKET_LOCAL_PROXY_MODE.trim().toLowerCase() : 'auto';
+    if (!['auto', 'direct', 'oxylabs'].includes(requestedMode))
+        throw new ExtractionError('INVALID_LOCAL_PROXY_MODE', 'proxy-setup');
+
+    if (requestedMode === 'direct') return { settings: { ...DIRECT_LOCAL_SETTINGS }, proxy: null };
+
+    const credentialsConfigured = Object.hasOwn(env, 'OXYLABS_USERNAME') || Object.hasOwn(env, 'OXYLABS_PASSWORD');
+    if (requestedMode === 'auto' && !credentialsConfigured)
+        return { settings: { ...DIRECT_LOCAL_SETTINGS }, proxy: null };
+
+    const username = env.OXYLABS_USERNAME;
+    const password = env.OXYLABS_PASSWORD;
+    if (typeof username !== 'string' || !username.trim() || username.includes(':')
+        || typeof password !== 'string' || !password.trim()
+        || /^REEMPLAZAR_LOCALMENTE$/i.test(password.trim())
+        || /[\u0000-\u001f\u007f]/.test(username + password))
+        throw new ExtractionError('OXYLABS_CREDENTIALS_MISSING', 'proxy-setup');
+
+    const host = env.OXYLABS_HOST ?? OXYLABS_HOST;
+    const port = env.OXYLABS_PORT ?? OXYLABS_PORT;
+    if (host !== OXYLABS_HOST || String(port) !== OXYLABS_PORT)
+        throw new ExtractionError('OXYLABS_ENDPOINT_INVALID', 'proxy-setup');
+
+    return {
+        settings: { enabled: true, groups: [], country: null, mode: 'local-external-proxy', sessionMode: 'single-run' },
+        proxy: { server: `https://${OXYLABS_HOST}:${OXYLABS_PORT}`, username, password },
+    };
+}

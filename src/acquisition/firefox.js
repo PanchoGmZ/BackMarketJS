@@ -4,7 +4,7 @@ import { acquireOnce } from './firefox_page.js';
 import { event } from '../shared/diagnostics.js';
 import { ExtractionError } from '../shared/values.js';
 
-function makeAuthenticatedProxyUrl(proxy) {
+export function makeAuthenticatedProxyUrl(proxy) {
     if (!proxy || typeof proxy.server !== 'string' || typeof proxy.username !== 'string' || !proxy.username
         || typeof proxy.password !== 'string' || !proxy.password || proxy.username.includes(':'))
         throw new ExtractionError('PROXY_BRIDGE_INIT_ERROR', 'proxy-bridge');
@@ -13,11 +13,9 @@ function makeAuthenticatedProxyUrl(proxy) {
         if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password
             || (url.pathname !== '/' && url.pathname !== '') || url.search || url.hash)
             throw new Error('invalid proxy endpoint');
-        // The SDK has already decoded these fields. Encode them once for the
-        // authenticated upstream URL consumed by proxy-chain.
-        url.username = encodeURIComponent(proxy.username);
-        url.password = encodeURIComponent(proxy.password);
-        return url.href;
+        // Build the userinfo once. WHATWG URL setters preserve malformed `%`
+        // sequences, while setting encodeURIComponent() output double-encodes it.
+        return `${url.protocol}//${encodeURIComponent(proxy.username)}:${encodeURIComponent(proxy.password)}@${url.host}/`;
     } catch {
         throw new ExtractionError('PROXY_BRIDGE_INIT_ERROR', 'proxy-bridge');
     }
@@ -58,7 +56,9 @@ export async function acquire(input, options = {}) {
             const bridgeStarted = performance.now();
             try {
                 upstreamProxyUrl = makeAuthenticatedProxyUrl(proxy);
-                localProxyUrl = await anonymizeProxyFn({ url: upstreamProxyUrl });
+                const bridgeOptions = { url: upstreamProxyUrl };
+                if (proxyMode === 'local-external-proxy') bridgeOptions.ignoreProxyCertificate = true;
+                localProxyUrl = await anonymizeProxyFn(bridgeOptions);
                 const local = localProxyServer(localProxyUrl);
                 browserProxy = { server: `http://127.0.0.1:${local.port}` };
                 proxyBridge = true;

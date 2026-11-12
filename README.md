@@ -4,7 +4,7 @@ Actor de Apify que recibe una URL de producto de Back Market, obtiene la ficha c
 
 ## Tecnologias
 
-Node.js 24, Apify SDK, Playwright Firefox, `proxy-chain` para autenticar Apify UNBLOCKER y Cheerio para procesar los datos Nuxt.
+Node.js 24, Apify SDK, Playwright Firefox, `proxy-chain` para autenticar Apify UNBLOCKER en Cloud y Oxylabs Web Unblocker en local, y Cheerio para procesar los datos Nuxt.
 
 ## Estructura
 
@@ -34,7 +34,37 @@ En el Actor existente de Apify, actualiza el codigo desde este repositorio y cre
 
 ## Ejecucion local en Windows
 
-Instala las dependencias con `npm ci` y Firefox con `npx playwright install firefox`. Crea `input.json` en la raiz con `{"url":"https://www.backmarket.com/en-us/p/switch-lite"}` y ejecuta `apify run` desde PowerShell. Se abre Firefox visible con conexion directa. El archivo local se usa cuando no hay input explicito del SDK y no se utiliza en Apify Cloud. Los resultados se guardan en `storage/`. Si el sitio muestra un desafio o rechaza el acceso, el Actor termina con un diagnostico.
+Instala las dependencias con `npm ci` y Firefox con `npx playwright install firefox`. Crea `input.json` en la raiz con `{"url":"https://www.backmarket.com/en-us/p/switch-lite"}` y ejecuta `apify run` desde PowerShell. Si no hay credenciales Oxylabs, se abre Firefox visible con conexion directa. El archivo local se usa cuando no hay input explicito del SDK y no se utiliza en Apify Cloud. Los resultados se guardan en `storage/`. Si el sitio muestra un desafio o rechaza el acceso, el Actor termina con un diagnostico.
+
+#### Oxylabs Web Unblocker local
+
+Node.js 24 carga `.env.local` automaticamente durante la ejecucion local. El archivo no se lee en Apify Cloud. Desde PowerShell, crea y abre el archivo:
+
+```powershell
+Copy-Item .env.local.example .env.local
+notepad .env.local
+```
+
+Reemplaza `REEMPLAZAR_LOCALMENTE` en `OXYLABS_PASSWORD` por la contrasena de Oxylabs y guarda el archivo. El signo `=` puede escribirse directamente, por ejemplo `OXYLABS_PASSWORD=valor=resto`. No agregues la contrasena a `input.json`, al Input de Apify ni a archivos versionados. Con usuario y contrasena validos, el modo local selecciona `local-external-proxy` automaticamente: Firefox headless usa el puente `proxy-chain` en `127.0.0.1`, que autentica contra `https://unblock.oxylabs.io:60000`. No se usa perfil persistente ni espera de verificacion manual en este modo. Las excepciones de certificados necesarias se limitan a las conexiones de Oxylabs y a la respuesta HTTPS recibida mediante Web Unblocker; no se desactiva TLS globalmente.
+
+Ejecuta la extraccion:
+
+```powershell
+apify run
+```
+
+Confirma en el log `[PROXY]` que aparece `mode: local-external-proxy` y `[PROXY_BRIDGE]` con `status: ready` y `listenHost: 127.0.0.1`. Los logs no imprimen la URL ni las credenciales del upstream. El Dataset local esta en `storage/datasets/default/`; el Dataset no se considerara verificado hasta que completes una extraccion.
+
+Para volver al modo directo sin borrar las credenciales, ejecuta en esa misma ventana de PowerShell:
+
+```powershell
+$env:BACKMARKET_LOCAL_PROXY_MODE = 'direct'
+apify run
+```
+
+Para volver al modo automatico despues, ejecuta `Remove-Item Env:BACKMARKET_LOCAL_PROXY_MODE`. Tambien puedes renombrar `.env.local` para que la siguiente ejecucion seleccione el modo directo. En modo directo se conserva Firefox visible, el diagnostico actual y la espera manual local de 10 segundos.
+
+Si quieres solicitar Oxylabs explicitamente, puedes definir `$env:BACKMARKET_LOCAL_PROXY_MODE = 'oxylabs'`; si faltan usuario o contrasena, el Actor falla con `OXYLABS_CREDENTIALS_MISSING` en vez de cambiar a modo directo. El Input publico sigue teniendo solamente el campo `url`.
 
 La espera manual local de la pagina de verificacion es de 10 segundos por defecto, limitada tambien por el presupuesto restante. Para utilizar los 30 segundos de la configuracion local anterior, ejecuta `$env:BACKMARKET_LOCAL_CHALLENGE_SECONDS = '30'` en PowerShell antes de `apify run`. Se admiten enteros entre 1 y 120; valores invalidos usan 10. La opcion solo afecta al modo local directo.
 

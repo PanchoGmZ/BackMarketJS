@@ -46,7 +46,7 @@ function proxyBridgeNavigationFailure(diagnosis) {
 async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budget, signal, browserType = firefox,
     attemptNumber = 1, proxyBridge = false, localDirect = false } = {}) {
     const started = performance.now(), remaining = () => Math.min(budget.remaining(budget.acquisition), budget.remaining());
-    const tlsVerified = proxyMode !== 'unblocker';
+    const tlsVerified = proxyMode !== 'unblocker' && proxyMode !== 'local-external-proxy';
     const fastMode = input.firefoxFastMode === true;
     const report = { status: 'running', navigationCount: 0, directApiRequests: 0, requests: [], redirects: [],
         resourceErrors: [], navigationFailures: [], browserClosed: false, stage: 'browser-start', tlsVerified,
@@ -136,7 +136,8 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
     }
     let monitor;
     try {
-        const launch = browserType.launch({ headless: localDirect ? false : process.env.APIFY_IS_AT_HOME === '1' || process.platform !== 'win32',
+        const launch = browserType.launch({ headless: proxyMode === 'local-external-proxy'
+            || (!localDirect && (process.env.APIFY_IS_AT_HOME === '1' || process.platform !== 'win32')),
             timeout: Math.max(1, remaining() - 2000), ...(proxy ? { proxy } : {}) });
         launch.then(b => { if (closing) b.close().catch(() => {}); }, () => {});
         browser = await bounded(launch, remaining() - 2000, signal, 'browser-start');
@@ -146,7 +147,9 @@ async function acquireAttempt(input, { proxy = null, proxyMode = 'direct', budge
         context = await bounded(browser.newContext({ ignoreHTTPSErrors: !tlsVerified }), remaining() - 2000, signal, 'context-start');
         if (report.timings) report.timings.contextSetupSeconds = (performance.now() - contextStarted) / 1000;
         event('PROXY_TRANSPORTE', { transport: 'firefox', ...report.proxyTransport });
-        event('TLS', { transport: 'firefox', verified: tlsVerified });
+        event('TLS', { transport: 'firefox', verified: tlsVerified,
+            ...(proxyMode === 'local-external-proxy'
+                ? { targetTlsVerified: false, upstreamProxyTlsVerified: false } : {}) });
         const pageStarted = performance.now();
         page = await context.newPage();
         if (manualAllowed) {
