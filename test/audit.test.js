@@ -37,6 +37,7 @@ test('el esquema publico solo presenta url y acepta opciones antiguas por API', 
     assert.deepEqual(schema.required, ['url']);
     assert.equal(schema.properties.url.title, 'URL del producto');
     assert.equal(schema.properties.url.description, 'Introduce el enlace del producto de Back Market que deseas extraer');
+    assert.equal(schema.properties.url.format, undefined);
     assert.equal(schema.additionalProperties, true);
     const publicUrlPattern = new RegExp(schema.properties.url.pattern);
     assert.match('https://www.backmarket.com/en-us/p/ipad-air-2020-a14-series', publicUrlPattern);

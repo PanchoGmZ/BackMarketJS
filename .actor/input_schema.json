@@ -2,7 +2,9 @@
   "title": "Buscar producto Back Market",
   "type": "object",
   "schemaVersion": 1,
-  "required": ["url"],
+  "required": [
+    "url"
+  ],
   "additionalProperties": true,
   "properties": {
     "url": {
@@ -10,7 +12,6 @@
       "type": "string",
       "description": "Introduce el enlace del producto de Back Market que deseas extraer",
       "editor": "textfield",
-      "format": "uri",
       "pattern": "^https://www\\.backmarket\\.com/en-us/p/[^/?#]+(?:/[0-9a-fA-F-]{36})?(?:[?#].*)?$",
       "prefill": "https://www.backmarket.com/en-us/p/ipad-air-2020-a14-series"
     }
