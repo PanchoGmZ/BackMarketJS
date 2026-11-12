@@ -1,7 +1,6 @@
 
 import { Actor } from 'apify';
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
 import { parseInput } from './input.js';
 import { proxySettings, configureProxy, localProxyConfiguration } from '../acquisition/proxy.js';
 import { acquire as acquireFirefox } from '../acquisition/firefox.js';
@@ -17,7 +16,7 @@ const CLOUD_PROXY_CONFIGURATION = Object.freeze({
 });
 
 export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
-    acquireFn = acquireFirefox, proxyFn = configureProxy, env = process.env } = {}) {
+    acquireFn = acquireFirefox, proxyFn = configureProxy, env = process.env, inputSource } = {}) {
     const state = { source: 'backmarket', runtime: 'javascript', extractionMethod: 'nuxt',
         runId: randomUUID(), startedAt: new Date().toISOString(), status: 'running',
         stage: 'actor-init', savedResults: 0, extractionPerformed: false, timings: {}, error: null };
@@ -43,13 +42,11 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
             await actor.exit({ exitCode: 143, timeoutSecs: 1 });
         });
         state.stage = 'input';
-        if (rawInput !== undefined) await actor.setValue(process.env.ACTOR_INPUT_KEY || 'INPUT', rawInput);
         const atHome = actor.isAtHome();
-        let actorInput = await bounded(actor.getInput(), budget.remaining(), null, 'input');
-        if (!atHome && actorInput == null) {
-            try { actorInput = JSON.parse((await readFile('input.json', 'utf8')).replace(/^\uFEFF/, '')); }
-            catch (error) { if (error.code !== 'ENOENT') throw error; }
-        }
+        let actorInput = !atHome && rawInput !== undefined
+            ? rawInput
+            : await bounded(actor.getInput(), budget.remaining(), null, 'input');
+        event('INPUT', { origin: atHome ? 'apify' : inputSource ?? (rawInput !== undefined ? 'explicit' : 'storage') });
         input = parseInput(actorInput);
         budget.configure(input);
         state.transport = 'firefox';

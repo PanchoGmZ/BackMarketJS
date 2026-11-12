@@ -34,18 +34,11 @@ En el Actor existente de Apify, actualiza el codigo desde este repositorio y cre
 
 ## Ejecucion local en Windows
 
-Instala las dependencias con `npm ci` y Firefox con `npx playwright install firefox`. Crea `input.json` en la raiz con `{"url":"https://www.backmarket.com/en-us/p/switch-lite"}` y ejecuta `apify run` desde PowerShell. Si no hay credenciales Oxylabs, se abre Firefox visible con conexion directa. El archivo local se usa cuando no hay input explicito del SDK y no se utiliza en Apify Cloud. Los resultados se guardan en `storage/`. Si el sitio muestra un desafio o rechaza el acceso, el Actor termina con un diagnostico.
+Instala las dependencias con `npm ci` y Firefox con `npx playwright install firefox`. En ejecuciones locales sin Input explicito de Apify CLI, `input.json` en la raiz es la fuente de la URL, aunque Storage contenga un Input anterior. Si el archivo no existe, la primera ejecucion local lo crea una vez desde `input.template.json`; nunca sobrescribe uno existente. Edita solo el campo `url` y ejecuta `apify run`. `input.json` queda excluido de Git y Docker. Los resultados se guardan en `storage/`. Si el sitio muestra un desafio o rechaza el acceso, el Actor termina con un diagnostico.
 
 #### Oxylabs Web Unblocker local
 
-Node.js 24 carga `.env.local` automaticamente durante la ejecucion local. El archivo no se lee en Apify Cloud. Desde PowerShell, crea y abre el archivo:
-
-```powershell
-Copy-Item .env.local.example .env.local
-notepad .env.local
-```
-
-Reemplaza `REEMPLAZAR_LOCALMENTE` en `OXYLABS_PASSWORD` por la contrasena de Oxylabs y guarda el archivo. El signo `=` puede escribirse directamente, por ejemplo `OXYLABS_PASSWORD=valor=resto`. No agregues la contrasena a `input.json`, al Input de Apify ni a archivos versionados. Con usuario y contrasena validos, el modo local selecciona `local-external-proxy` automaticamente: Firefox headless usa el puente `proxy-chain` en `127.0.0.1`, que autentica contra `https://unblock.oxylabs.io:60000`. No se usa perfil persistente ni espera de verificacion manual en este modo. Las excepciones de certificados necesarias se limitan a las conexiones de Oxylabs y a la respuesta HTTPS recibida mediante Web Unblocker; no se desactiva TLS globalmente.
+Node.js 24 carga automaticamente el `.env.local` local ya configurado; no hace falta copiarlo ni editarlo para cada ejecucion, y nunca se carga en Apify Cloud. El archivo permanece excluido de Git y Docker. No pongas credenciales en `input.json` ni en el Input de Apify. Con usuario y contrasena validos, el modo local selecciona `local-external-proxy` automaticamente: Firefox headless usa el puente autenticado `proxy-chain` en `127.0.0.1` hacia Oxylabs. No se usa perfil persistente ni espera de verificacion manual en este modo. Las excepciones de certificados necesarias se limitan a las conexiones de Oxylabs y a la respuesta HTTPS recibida mediante Web Unblocker; no se desactiva TLS globalmente.
 
 Ejecuta la extraccion:
 
@@ -53,7 +46,7 @@ Ejecuta la extraccion:
 apify run
 ```
 
-Confirma en el log `[PROXY]` que aparece `mode: local-external-proxy` y `[PROXY_BRIDGE]` con `status: ready` y `listenHost: 127.0.0.1`. Los logs no imprimen la URL ni las credenciales del upstream. El Dataset local esta en `storage/datasets/default/`; el Dataset no se considerara verificado hasta que completes una extraccion.
+Confirma en los logs `[INPUT]` con origen `input.json`, `[PROXY]` con `mode: local-external-proxy` y `[PROXY_BRIDGE]` con `status: ready` y `listenHost: 127.0.0.1`. Los logs no imprimen la URL ni las credenciales del upstream. Un Input pasado explicitamente con `apify run --input` o `--input-file` conserva prioridad. El Dataset local esta en `storage/datasets/default/`.
 
 Para volver al modo directo sin borrar las credenciales, ejecuta en esa misma ventana de PowerShell:
 
