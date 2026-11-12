@@ -20,21 +20,17 @@ src/
 
 ## Input
 
-El Actor procesa una URL HTTPS de `www.backmarket.com/en-us/p/...`, con UUID o con una identidad explicita verificable en el documento. Conserva la URL completa, incluidos `l`, `offerType`, parametros picker adicionales y fragmentos. No se asume que omitir `closestPickerConfig` o `pickerClicked` sea comercialmente equivalente: se conservan y los parametros de consulta se comparan despues de las redirecciones. La identidad y la oferta se validan con los datos recibidos.
+El formulario publico solicita un unico campo obligatorio: la URL HTTPS de una ficha de Back Market. El esquema valida el dominio y la ruta de producto. Firefox/Playwright, el proxy Apify UNBLOCKER en Cloud y la salida `reference1688` se configuran internamente. Inputs antiguos enviados por API se aceptan cuando sus campos tecnicos conocidos son validos, pero Cloud fuerza UNBLOCKER y no depende de `proxyAccessAuthorized`.
 
 ```json
 {
-  "url": "https://www.backmarket.com/en-us/p/iphone-14-128-gb-midnight-att/ec6b3e5e-676e-40f9-91a6-1c9d8537209b?l=12",
-  "outputFormat": "reference1688",
-  "proxyAccessAuthorized": true
+  "url": "https://www.backmarket.com/en-us/p/ipad-air-2020-a14-series"
 }
 ```
 
-Apify UNBLOCKER viene seleccionado en `proxyConfiguration`. La cuenta debe tener acceso al grupo y presupuesto autorizado. `proxy-chain` crea un puente local temporal para la autenticacion; no se introducen credenciales en el input. El modo normal es el predeterminado. `firefoxFastMode` es opcional, experimental y permanece desactivado por defecto.
-
 ## Ejecucion en Apify
 
-En el Actor existente de Apify, actualiza el codigo desde este repositorio y crea un build desde la raiz. Docker instala Firefox y sus dependencias Linux. Configura la URL, confirma la autorizacion del proxy y ejecuta el Actor. No hace falta crear otro Actor ni seleccionar un navegador.
+En el Actor existente de Apify, actualiza el codigo desde este repositorio y crea un build desde la raiz. Docker instala Firefox y sus dependencias Linux. Introduce solamente la URL del producto y ejecuta el Actor. Cloud selecciona Apify UNBLOCKER automaticamente; el acceso efectivo sigue sujeto a los permisos de la cuenta Apify. No hace falta seleccionar un navegador ni configurar opciones tecnicas.
 
 ## Ejecucion local en Windows
 

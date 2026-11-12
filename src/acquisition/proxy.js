@@ -1,10 +1,9 @@
 
 import { randomUUID } from 'node:crypto';
 import { ExtractionError, record } from '../shared/values.js';
-export function proxySettings(input, { requireAuthorization = true } = {}) {
+export function proxySettings(input) {
     const config = input.proxyConfiguration ?? { useApifyProxy: true, apifyProxyGroups: ['UNBLOCKER'] };
-    const authorized = input.proxyAccessAuthorized ?? false;
-    if (!record(config) || typeof authorized !== 'boolean'
+    if (!record(config) || (input.proxyAccessAuthorized !== undefined && typeof input.proxyAccessAuthorized !== 'boolean')
         || Object.keys(config).some(k => !['useApifyProxy', 'apifyProxyGroups', 'apifyProxyCountry', 'proxyUrls'].includes(k)))
         throw new ExtractionError('INVALID_PROXY_CONFIGURATION', 'proxy-setup');
     if (config.proxyUrls !== undefined && (!Array.isArray(config.proxyUrls) || config.proxyUrls.length))
@@ -14,7 +13,6 @@ export function proxySettings(input, { requireAuthorization = true } = {}) {
         || groups.some(g => typeof g !== 'string' || !/^[A-Za-z0-9._~]{1,64}$/.test(g))
         || (country !== null && (typeof country !== 'string' || !/^[A-Z]{2}$/.test(country))))
         throw new ExtractionError('INVALID_PROXY_CONFIGURATION', 'proxy-setup');
-    if (enabled && requireAuthorization && !authorized) throw new ExtractionError('PROXY_AUTHORIZATION_REQUIRED', 'proxy-setup');
     if (enabled && (!groups.length || groups.some(g => g.toUpperCase() === 'GOOGLE_SERP')))
         throw new ExtractionError('INVALID_PROXY_GROUP', 'proxy-setup');
     for (const special of ['RESIDENTIAL', 'UNBLOCKER'])

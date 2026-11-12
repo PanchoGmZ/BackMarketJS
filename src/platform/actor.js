@@ -53,7 +53,9 @@ export async function runActor({ actor = Actor, budget = new Budget(), rawInput,
         state.executionMode = 'live';
         state.timeBudget = { processSeconds: budget.total / 1000, acquisitionSeconds: budget.acquisition / 1000, workSeconds: budget.work / 1000 };
         workTimer = setTimeout(() => controller.abort(), budget.remaining());
-        const settings = atHome ? proxySettings(input) : { enabled: false, groups: [], country: null, mode: 'direct', sessionMode: null };
+        const settings = atHome
+            ? proxySettings({ ...input, proxyConfiguration: { useApifyProxy: true, apifyProxyGroups: ['UNBLOCKER'] } })
+            : { enabled: false, groups: [], country: null, mode: 'direct', sessionMode: null };
         state.proxy = { ...settings, status: settings.enabled ? 'pending' : 'disabled', connected: null, documentRequestSucceeded: null };
         await actor.setValue('RUN_STATE', state);
         event('LIMITES', { ...state.timeBudget, diagnosticMode: input.diagnosticMode });

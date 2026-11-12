@@ -25,9 +25,29 @@ test('URLs con UUID, picker y serie conservan su selección', () => {
     assert.equal(selectionState(url, url).status, 'preserved');
     assert.equal(parseInput({url:'https://www.backmarket.com/en-us/p/ipad-air-2020-a14-series'}).productId, null);
 });
-test('UNBLOCKER requiere autorización y selecciona su grupo', () => {
-    assert.throws(() => proxySettings(parseInput({url})), /PROXY_AUTHORIZATION_REQUIRED/);
-    assert.equal(proxySettings(parseInput({url,proxyAccessAuthorized:true})).mode, 'unblocker');
+test('UNBLOCKER se selecciona sin confirmacion tecnica en Input', () => {
+    const settings = proxySettings(parseInput({url}));
+    assert.equal(settings.enabled, true);
+    assert.deepEqual(settings.groups, ['UNBLOCKER']);
+    assert.equal(settings.mode, 'unblocker');
+});
+test('el esquema publico solo presenta url y acepta opciones antiguas por API', async () => {
+    const schema = JSON.parse(await readFile(new URL('../.actor/input_schema.json', import.meta.url), 'utf8'));
+    assert.deepEqual(Object.keys(schema.properties), ['url']);
+    assert.deepEqual(schema.required, ['url']);
+    assert.equal(schema.properties.url.title, 'URL del producto');
+    assert.equal(schema.properties.url.description, 'Introduce el enlace del producto de Back Market que deseas extraer');
+    assert.equal(schema.additionalProperties, true);
+    const publicUrlPattern = new RegExp(schema.properties.url.pattern);
+    assert.match('https://www.backmarket.com/en-us/p/ipad-air-2020-a14-series', publicUrlPattern);
+    assert.doesNotMatch('http://www.backmarket.com/en-us/p/ipad-air', publicUrlPattern);
+    assert.doesNotMatch('https://evil.example/en-us/p/ipad-air', publicUrlPattern);
+    const legacy = parseInput({url, proxyAccessAuthorized: false, proxyConfiguration: {useApifyProxy: false}, outputFormat: 'reference1688', diagnosticMode: false});
+    assert.equal(legacy.productId, uuid);
+});
+test('URL requiere HTTPS y una ficha de Back Market', () => {
+    for (const invalid of ['http://www.backmarket.com/en-us/p/ipad-air', 'https://evil.example/en-us/p/ipad-air', 'https://www.backmarket.com/en-us/search?q=ipad'])
+        assert.throws(() => parseInput({url: invalid}), /INVALID_PRODUCT_URL/);
 });
 test('precio y condiciones de la misma selección y once campos', () => {
     const input = parseInput({url});
@@ -69,9 +89,12 @@ test('desafío local 403 espera el límite y cierra sin HTML', async () => {
 test('Actor Cloud y local seleccionan rutas distintas sin escribir Dataset en error', async () => {
     for (const home of [true,false]) {
         let proxyCalls=0, options, writes=0;
-        const actor={isAtHome:()=>home,init:async()=>{},on:()=>{},setValue:async()=>{},getInput:async()=>({url,proxyAccessAuthorized:true}),exit:async()=>{},pushData:async()=>{writes++;}};
-        const result=await runActor({actor,proxyFn:async()=>{proxyCalls++;return {};},acquireFn:async(_input,o)=>{options=o;return {acquisition:{status:'error',error:{code:'OFFLINE_TEST'},requests:[]}};}});
+        const actor={isAtHome:()=>home,init:async()=>{},on:()=>{},setValue:async()=>{},getInput:async()=>({url,proxyAccessAuthorized:false,proxyConfiguration:{useApifyProxy:false}}),exit:async()=>{},pushData:async()=>{writes++;}};
+        let proxySettingsSeen;
+        const result=await runActor({actor,proxyFn:async(_actor,settings)=>{proxyCalls++;proxySettingsSeen=settings;return {};},acquireFn:async(_input,o)=>{options=o;return {acquisition:{status:'error',error:{code:'OFFLINE_TEST'},requests:[]}};}});
         assert.equal(proxyCalls,home?1:0); assert.equal(options.proxyMode,home?'unblocker':'direct');
+        if(home) assert.deepEqual(proxySettingsSeen.groups, ['UNBLOCKER']);
+        if(home) assert.equal(proxySettingsSeen.enabled, true);
         assert.equal(writes,0); assert.equal(result.state.status,'error');
     }
 });

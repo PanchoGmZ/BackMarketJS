@@ -1,60 +1,18 @@
 {
-  "title": "BackMarketJS - Extractor de productos",
+  "title": "Buscar producto Back Market",
   "type": "object",
   "schemaVersion": 1,
   "required": ["url"],
-  "additionalProperties": false,
+  "additionalProperties": true,
   "properties": {
     "url": {
       "title": "URL del producto",
       "type": "string",
-      "description": "URL HTTPS de una ficha de www.backmarket.com, con UUID o identidad verificable en el documento. Conserva l, offerType, parametros picker y fragmentos.",
+      "description": "Introduce el enlace del producto de Back Market que deseas extraer",
       "editor": "textfield",
-      "prefill": ""
-    },
-    "firefoxFastMode": {
-      "title": "Firefox rapido (experimental)",
-      "type": "boolean",
-      "description": "Modo opcional no confirmado en Apify Cloud. Espera al commit y bloquea imagenes, fuentes y multimedia. Desactivado por defecto.",
-      "default": false
-    },
-    "outputFormat": {
-      "title": "Formato de salida",
-      "type": "string",
-      "description": "Un producto agregado con once campos del contrato JSON 1688.",
-      "enum": ["reference1688"],
-      "default": "reference1688"
-    },
-    "diagnosticMode": {
-      "title": "Diagnostico extendido",
-      "type": "boolean",
-      "description": "Modo normal: 55 segundos. El modo extendido permite hasta 180 segundos.",
-      "default": false
-    },
-    "diagnosticTimeoutSeconds": {
-      "title": "Limite extendido (segundos)",
-      "type": "integer",
-      "description": "Solo se aplica si el diagnostico extendido esta activado.",
-      "minimum": 30,
-      "maximum": 180,
-      "default": 180
-    },
-    "proxyConfiguration": {
-      "sectionCaption": "Proxy Apify",
-      "title": "Apify Proxy",
-      "type": "object",
-      "description": "UNBLOCKER esta seleccionado por defecto. Requiere acceso autorizado y presupuesto disponible en la cuenta Apify. La autenticacion usa un proxy local temporal; no introduzcas credenciales manualmente.",
-      "editor": "proxy",
-      "default": {
-        "useApifyProxy": true,
-        "apifyProxyGroups": ["UNBLOCKER"]
-      }
-    },
-    "proxyAccessAuthorized": {
-      "title": "Confirmo autorizacion de acceso y presupuesto",
-      "type": "boolean",
-      "description": "Confirmacion del usuario; no concede permisos externos.",
-      "default": false
+      "format": "uri",
+      "pattern": "^https://www\\.backmarket\\.com/en-us/p/[^/?#]+(?:/[0-9a-fA-F-]{36})?(?:[?#].*)?$",
+      "prefill": "https://www.backmarket.com/en-us/p/ipad-air-2020-a14-series"
     }
   }
 }
